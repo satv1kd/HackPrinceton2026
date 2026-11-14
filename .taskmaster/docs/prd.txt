@@ -1,0 +1,431 @@
+<context>
+# Overview
+
+Working name: "Heard" (placeholder; final name TBD).
+
+One-line pitch: "Siri and Google don't understand everyone. Our app learns your way of speaking in 5 minutes, then speaks your words clearly and texts them for you."
+
+## Problem
+Standard speech recognition fails for many people with speech differences.
+- Google itself states that standard speech recognition models don't work very well for people with non-standard speech. (source: lovethework)
+- For speakers with Down syndrome, the best-performing algorithm (OpenAI) reached only 67% word accuracy. (source: chapman)
+- For severe dysarthria, standard systems' error rate was close to or above 100%. (source: arxiv)
+- Personalization helps a lot: errors dropped from 71% to 32% on average. (source: arxiv)
+
+## Who it's for
+Adults with moderate to severe speech differences (from Down syndrome, cerebral palsy, stroke, ALS, or other intellectual or motor disabilities), including people who use personal words (e.g., "wawa" for water).
+Explicit positioning: "If Siri already understands you, you don't need this."
+
+## Why it's valuable / differentiation
+
+| | Google Project Relate | Voiceitt | Heard |
+|---|---|---|---|
+| Setup | Record 500 phrases, then wait days for a personalized model | Subscription, proprietary | Works after ~5 minutes (a fixed set of ~25–30 phonetically balanced phrases x 3 recordings) |
+| Platform | Android only | App | Any phone browser + iMessage (via Photon) |
+| Personal words | No | Limited | Yes, learned from the user's own recordings |
+| When unsure | Guesses | Guesses | Shows top 3 as picture buttons to tap |
+| Gets better | Retraining | Retraining | Every Yes/No tap is labeled data; the phonetic profile retrains automatically once enough new examples per sound accumulate |
+
+Beyond the table: Heard uses linguistics (phonetics) to generalize. The setup phrases are chosen to contain all the sounds (phonemes) of English, so Heard learns *how this person produces each sound* (e.g., "says /w/ where /l/ or /r/ is expected", "drops final consonants") and applies that to common English words they never recorded.
+
+Versus ExpressBuddy (ISEF winner): Heard helps people be understood by real people right now; it is not an AI avatar for practicing conversation.
+
+## Explicit non-goals (do NOT build)
+- An AI chat companion or avatar.
+- Accounts, authentication, or multi-user support (MVP is single user).
+- A database (JSON + audio files on disk only).
+
+# Core Features
+
+## F1. Setup mode (phonetically balanced enrollment) — MUST HAVE
+- What: The user records a fixed, built-in set of ~25–30 everyday phrases (each with text + emoji preset), 3 times each. Together these phrases contain every phoneme of English. The user (or a supporter) can also add their own custom phrases and personal words.
+- Why: Recording a phrase set that covers every phoneme lets the phonetic engine (F6) learn how the person produces every sound in ~5 minutes, which is what allows generalizing beyond the recorded phrases. The phrases are also useful on their own (café, needs, greetings), so every recording does double duty: it is a whole-phrase template (F2) and phonetic training data (F6).
+- How:
+  - Built-in enrollment set shipped as a JSON file: phrase text, emoji, and its phoneme transcription.
+  - Coverage requirement for the built-in set, enforced by an automated coverage checker (see Technical Architecture):
+    - Every phoneme in the chosen inventory (General American English) appears at least MIN_PHONEME_OCCURRENCES times across the set (default 2, configurable).
+    - Every consonant appears in word-initial and word-final position where English phonotactics allow it (e.g., /ŋ/ never starts a word in English; /ʒ/ word-initially is rare and is exempt).
+    - Phrases stay short, functional, and easy to say (target ≤ 6 words each).
+    - The exact phrase list is written during implementation and must pass the checker. It is not fixed in this PRD.
+  - Guided recording flow: shows one phrase at a time (big emoji + text), with a record button, playback, re-record, then the next phrase, plus a progress bar ("12 of 28").
+  - Custom phrases: text field, emoji picker OR photo upload, then 3 recordings. A toggle "This is my own word (not standard English)" marks it as a personal word. Personal words are used for whole-phrase matching only and are excluded from phonetic profile learning, because they don't follow standard pronunciation (e.g., "wawa").
+  - Each sample is uploaded to the server and converted/cleaned; features and phoneme recognitions are extracted and cached.
+  - Phrase list view: all phrases with visual + text and sample count; delete phrase, delete individual sample, add more samples.
+  - Phoneme coverage view (simple): shows which sounds have enough examples and which are weak.
+
+## F2. Talk mode — MUST HAVE
+- What: One very large "hold to talk" button. The user presses and holds, speaks, then releases. A large card shows what was understood and the phone speaks it aloud in a clear voice.
+- Why: This is the core moment: the user is understood by another person immediately.
+- How:
+  - Press-and-hold starts MediaRecorder; release stops and uploads audio to POST /api/recognize.
+  - Hybrid recognizer (see Technical Architecture):
+    1. Whole-phrase matcher: DTW against every saved phrase sample (best for enrolled and personal phrases).
+    2. Phonetic decoder (F6): phoneme recognition + the user's phonetic profile + lexicon decoding, which produces candidate transcripts of common English words not in the phrase list.
+    3. The candidates are merged and ranked, then a confident/unsure decision is made.
+  - Confident whole-phrase match: show the phrase card and speak it.
+  - Results from the phonetic decoder (generated text) are never spoken automatically. They always go through the top-3 picker (F3) for the user to confirm, because they are less reliable.
+  - Speech: the server calls ElevenLabs TTS and returns audio. If ElevenLabs is unavailable (no API key, network error, quota), the client falls back to the browser's built-in speechSynthesis.
+  - TTS audio is cached on disk keyed by (text, voice), so repeated phrases play instantly and don't use quota.
+
+## F3. Unsure fallback (top-3 picker) — MUST HAVE
+- What: If the best candidate does not clearly beat the second-best by a tunable margin, or if the best candidate is generated text from the phonetic decoder, show the top 3 candidates as big buttons to tap.
+- Why: Avoids confidently saying the wrong thing and gives the user control. Competitors simply guess.
+- How:
+  - The server returns `confident: false` plus the top 3 candidates. Each candidate is either a saved phrase (with emoji/image) or generated text (shown with a generic "speech" icon).
+  - The client renders 3 large buttons. Tapping one = a "Yes" label for that candidate (F4); the card is shown and spoken.
+  - "None of these" opens the correction options in F4.
+
+## F4. Accuracy feedback buttons + learning from use — MUST HAVE
+- What: After every result, two very large, unmistakable buttons appear: "✓ Yes, that's right" and "✗ No". Every tap is stored as labeled training data.
+- Why: Explicit Yes/No labels are clean training data for both the whole-phrase matcher and the phonetic profile. Silent auto-confirmation is not used, because a wrong label would teach the model the wrong thing.
+- How:
+  - The recognize response includes an `attempt_id`. The server holds the cleaned audio, features, and recognized phonemes for that attempt.
+  - "Yes" → POST /api/feedback {attempt_id, correct: true, label: <the shown candidate>}.
+  - "No" → correction screen with large options: (a) the other top-3 candidates, (b) the full phrase list (picture grid), (c) "Type what I said" (for a supporter), (d) "Skip". Choosing (a)–(c) sends {correct: false, label: <the correct text/phrase>}. That is labeled data under the correct label, and a negative example for the wrong candidate. Choosing (d) stores only the negative signal.
+  - An undo toast for a few seconds after any tap, to catch mis-taps (important for users with motor impairments).
+  - No tap at all → the attempt is discarded and never used for training.
+  - Whole-phrase matcher: a labeled attempt whose label is a saved phrase is immediately added as a new sample for that phrase (no threshold needed; templates are just examples). Cap samples per phrase (MAX_SAMPLES_PER_PHRASE, keep the most recent); enrollment samples are never evicted.
+  - Phonetic profile: labeled attempts are aligned to their expected phonemes. Each aligned phoneme increments that phoneme's "new examples since last retrain" counter. Retraining is triggered per F6.
+
+## F5. Send through iMessage (Photon) — MUST HAVE
+- What: From the result card, buttons like "Send to Café" or "Send to Mom" send the understood text as an iMessage.
+- Why: Lets the user be understood remotely, not just face to face.
+- How:
+  - A small TypeScript service runs on a Mac signed into Messages and uses Photon's local iMessage SDK to send messages from that Apple ID.
+  - The FastAPI server forwards POST /api/send {text, contact_id} to the TS service over localhost HTTP.
+  - Contacts are configured in a JSON file (name, handle = phone number or email, optional emoji). A simple contacts editor in the UI is a nice-to-have; editing the JSON by hand is acceptable for MVP.
+  - The UI shows sent/failed status.
+  - Send buttons appear only after the result has been confirmed (Yes tap or picker tap), so wrong text is never sent.
+
+## F6. Phonetic generalization engine — MUST HAVE (built after the whole-phrase demo path works)
+- What: Learns the user's personal pattern of sound production from their enrollment and feedback data, then uses it to recognize common English words and short sentences they never recorded.
+- Why: Nobody can record every word. Speech-language pathology describes atypical speech in terms of consistent sound-level patterns (e.g., gliding /r/,/l/→/w/; final consonant deletion; cluster reduction; devoicing). Modeling those patterns per user lets ~25–30 recorded phrases generalize to a common-word vocabulary.
+- How (high level; details in Technical Architecture):
+  1. Phoneme recognition: a pretrained phoneme-level speech model converts audio into a phoneme sequence (with per-frame probabilities).
+  2. Alignment: for each labeled recording (enrollment + feedback), align the recognized phonemes against the expected phonemes of the known text.
+  3. Phonetic profile: from those alignments, estimate a per-user confusion model P(recognized phoneme | intended phoneme), including deletions and insertions, smoothed toward a generic prior so sounds with few examples aren't overfit.
+  4. Decoding: for a new utterance, score candidate words/sentences from a common-English lexicon by how likely the user's profile would make them sound like what was recognized, combined with a word-frequency prior. Output the top 3 transcripts.
+  5. Retraining: when an intended phoneme accumulates RETRAIN_MIN_NEW_EXAMPLES new aligned examples since its last update (default 10, configurable), recompute that phoneme's row of the profile. The new profile is kept only if it does not reduce accuracy on held-out labeled attempts; otherwise it rolls back.
+  6. Threshold experiment: a script replays logged feedback data with different thresholds (e.g., 3, 5, 10, 20) and reports the accuracy gain per retrain, to find the minimum number of new examples per sound that meaningfully improves accuracy. 10 is the default until this data exists; the measured value replaces it in config.
+- Scope limits (to keep it achievable and honest):
+  - Vocabulary is a bounded common-English lexicon (size LEXICON_SIZE, configurable), not every possible word.
+  - Utterances decoded by the phonetic engine are limited to short sentences (MAX_DECODE_WORDS, configurable).
+  - Generated transcripts always require user confirmation before being spoken or sent.
+
+## Nice-to-have features (only if time allows)
+- N1. Phrase packs: preloaded situation phrase sets (café ordering, bus, doctor's office, emergency) with text + emoji, so the user only needs to record, not type. These also boost those words in the phonetic decoder's language prior.
+- N2. Listener screen: a second phone/tablet ("the counter") opens a listener page and displays incoming phrases in large type in real time.
+- N3. Benchmark: script + slide comparing Whisper vs. our matcher/phonetic engine on public research data of atypical speech.
+- N4. Custom ElevenLabs voice for spoken phrases (relevant if there's an MLH prize for ElevenLabs).
+- N5. Whisper "second opinion": run Whisper on the recording; if its transcript loosely matches a candidate's text, boost that candidate's score.
+- N6. Pretrained speech embeddings (HuBERT / wav2vec2) as the DTW feature extractor, switchable via config, replacing MFCC as primary if it performs better.
+- N7. Acoustic-model fine-tuning: once a large pool of labeled data exists, fine-tune the phoneme recognizer itself (e.g., lightweight adapter/LoRA fine-tuning) on the user's data, in addition to the confusion-profile retraining. Only if feasible on the available hardware.
+
+# User Experience
+
+## Personas
+- Primary user ("Speaker"): An adult with moderate-to-severe speech differences (e.g., Down syndrome, cerebral palsy, post-stroke dysarthria, ALS). May have limited fine motor control and/or limited reading ability, so the UI must rely on large targets and pictures, not small text.
+- Setup helper ("Supporter"): A family member, caregiver, or therapist who may help with setup, add custom phrases, and type corrections, while the Speaker does the recordings.
+- Listener: A barista, bus driver, receptionist, or family member who needs to understand the Speaker. Never installs anything; hears the spoken phrase, reads the card, or receives a text.
+
+## Key user flows
+1. First-time setup: open the HTTPS URL on the phone → allow microphone → guided enrollment through the built-in phonetically balanced set (record each phrase 3 times, play back / re-record as needed) → optionally add custom phrases / personal words → done (~5 minutes target for the built-in set).
+2. Talk (confident phrase): Talk mode → hold the big button → speak → release → large card + spoken aloud → tap "✓ Yes" (or "✗ No") → optionally "Send to Mom" → message delivered.
+3. Talk (unsure or new words): hold → speak → release → three big candidate buttons (saved phrases and/or generated sentences) → tap the correct one (counts as Yes) → card + spoken output → optional send.
+4. Correction: result is wrong → tap "✗ No" → pick from top 3, the phrase grid, or "Type what I said" → the correct text is spoken → the attempt is saved under the correct label.
+5. Manage: Setup mode → view phrases, delete / add samples, view the phoneme coverage screen (which sounds are well learned, which need more examples, progress toward the next retrain).
+
+## UI/UX considerations
+- Mobile-first, single page, vanilla HTML/CSS/JS; two primary modes (Talk, Setup) switched by a large toggle/tab.
+- Very large touch targets (the talk button fills a large part of the screen), high contrast, large type, picture-first buttons.
+- Yes/No feedback buttons: each at least half the screen width, distinct colors AND icons (✓ / ✗) so they don't rely on color alone, with an undo toast for mis-taps.
+- Clear recording state (color change + pulsing indicator) while the button is held.
+- Minimum recording length guard (ignore accidental taps) and maximum length cap.
+- Visually distinguish "saved phrase" results (emoji/photo) from "generated" results (generic icon) so the user knows which are less certain.
+- Show a friendly message when enrollment isn't finished, prompting Setup.
+- Show a "listening/thinking" state while waiting for a result.
+- Works in iPhone Safari (requires HTTPS) and Android Chrome.
+</context>
+<PRD>
+# Technical Architecture
+
+## System components
+1. Mobile web client (vanilla HTML/CSS/JS, served as static files by FastAPI)
+   - MediaRecorder-based capture; uploads raw blobs (webm/opus on Chrome, mp4/aac on iPhone Safari).
+   - Talk mode, Setup mode (guided enrollment, custom phrases, coverage screen), top-3 picker, Yes/No feedback + correction screen, result card, send buttons.
+   - Audio playback for ElevenLabs output; speechSynthesis fallback.
+2. Python FastAPI server
+   - Libraries: fastapi, uvicorn, librosa, numpy, fastdtw, soundfile, ffmpeg (system binary), httpx (ElevenLabs + Photon calls), transformers + torch (phoneme recognizer), a G2P/pronunciation source for the lexicon (see Phonetics), rapidfuzz (optional fuzzy matching). Later: Whisper (N5).
+   - Modules: audio preprocessing, feature extraction, whole-phrase matcher, phoneme recognizer, pronunciation lexicon, aligner, phonetic profile, phonetic decoder, hybrid ranker, feedback store, retrainer, phrase store, TTS proxy/cache, send proxy.
+3. Photon iMessage service (TypeScript, Node)
+   - Runs on a Mac signed into Messages; uses Photon's local iMessage SDK.
+   - Exposes a minimal localhost HTTP endpoint: POST /send {to, text} → {ok, error?}.
+   - Exact Photon SDK package and API calls: TO CONFIRM against Photon docs during implementation; keep them behind this one endpoint so the rest of the system doesn't depend on them.
+4. HTTPS tunnel
+   - cloudflared or ngrok in front of the FastAPI server, because iPhone Safari only grants microphone access on HTTPS pages.
+
+## Audio pipeline
+1. Upload: the client posts the raw blob (multipart) with its MIME type.
+2. Convert: ffmpeg converts any input format to 16 kHz, mono, 16-bit PCM WAV.
+3. Clean: trim leading/trailing silence (librosa.effects.trim with a tunable top_db), peak/RMS normalize volume. Reject clips that are too short after trimming (return a "didn't catch that" error).
+4. Whole-phrase features (pluggable `FeatureExtractor` interface):
+   - MVP: MFCC (e.g., 13 coefficients + deltas, per-utterance mean/variance normalization (CMVN)), as a frames x dims matrix.
+   - Later (N6): HuBERT or wav2vec2 hidden-state frame embeddings via transformers (model + layer configurable). Selected via config; features are cached per extractor name so switching doesn't corrupt caches.
+5. Phoneme recognition (for F6): run the phoneme recognizer once per clip; cache the decoded phoneme sequence and the per-frame phoneme posteriors (.npy).
+6. Cache: all features are saved alongside the audio so matching never re-extracts enrolled samples.
+
+## Whole-phrase matching (DTW)
+- For a query recording, compute DTW distance (fastdtw, cosine or euclidean) against every saved sample of every phrase.
+- Normalize the DTW distance by path length so short and long phrases are comparable.
+- Phrase score = its closest (minimum) sample distance.
+- Rank phrases by score.
+
+## Phonetics
+- Phoneme inventory: General American English. The recognizer's output symbols and the lexicon's pronunciations MUST use the same inventory. If they differ (e.g., IPA from the recognizer vs. ARPAbet from CMUdict), a mapping table converts them into one canonical set, with unit tests.
+- Phoneme recognizer: a pretrained CTC phoneme-recognition model from Hugging Face. Candidate: `facebook/wav2vec2-lv-60-espeak-cv-ft` (outputs espeak-style IPA phonemes). The exact checkpoint is TO CONFIRM during implementation (check output symbol set, license, CPU latency).
+- Pronunciation lexicon: a common-English word list of LEXICON_SIZE words ranked by frequency (the source list is TO CHOOSE; must have a permissive license), with pronunciations from CMUdict and/or phonemizer + espeak-ng, normalized to the canonical inventory. Includes all words in the enrollment set, phrase packs, and custom (non-personal) phrases.
+- Enrollment coverage checker (script + unit test): loads the built-in enrollment set, transcribes it with the lexicon, and fails if any phoneme is below MIN_PHONEME_OCCURRENCES or if allowed word-initial/word-final consonant positions are missing (with a documented exemption list, e.g. /ŋ/ initial, /ʒ/ initial). It prints a coverage table.
+- Aligner: weighted Levenshtein / Needleman–Wunsch alignment between the recognized phoneme sequence and the expected phoneme sequence of the labeled text. It produces (intended, recognized | DELETION) pairs and insertions.
+- Phonetic profile (per user):
+  - Count matrix C[intended][recognized] including a DELETION column and an INSERTION row.
+  - Probabilities P(recognized | intended) = (C + α·Prior) normalized, where Prior is a generic confusion prior (an identity-heavy matrix, optionally adjusted by phonetic-feature similarity such as place/manner/voicing) and α is a smoothing weight. Sounds with few examples stay close to the prior.
+  - Initial profile built from all enrollment samples (personal words excluded).
+  - Versioned on disk (profile_v<N>.json) so it can roll back.
+- Phonetic decoder:
+  - Cost of a candidate word = minimum-cost alignment between its expected phonemes and the recognized phonemes, with substitution/deletion/insertion costs = -log P from the profile. (Upgrade path: score directly against per-frame CTC posteriors instead of the 1-best phoneme string.)
+  - Sentence decoding: beam search that segments the recognized phoneme sequence into lexicon words (up to MAX_DECODE_WORDS), with total score = acoustic/profile cost + λ · language prior (word frequency unigram; bigram if a source is available) + bonus for words/phrases in the user's phrase list and packs.
+  - Output: top-K transcripts with normalized scores.
+- Hybrid ranker:
+  - Merge DTW phrase candidates and phonetic-decoder transcripts into one ranked list using calibrated scores (calibration fitted on labeled attempts; until then, a simple rule: a DTW phrase match beats generated text unless the DTW margin is below threshold).
+  - Confidence decision: confident only if the top candidate is a saved phrase AND (second - best)/second ≥ MARGIN AND best ≤ ABSOLUTE_MAX. Otherwise confident=false with top 3.
+- Retraining (triggered by feedback):
+  - The feedback store keeps, per intended phoneme, a counter of new aligned examples since its last profile update.
+  - When any phoneme's counter reaches RETRAIN_MIN_NEW_EXAMPLES (default 10): rebuild that phoneme's row from all its aligned examples, evaluate the candidate profile against the current one on a held-out slice of labeled attempts (top-1 / top-3 accuracy), promote it only if it is not worse, then reset the counter. Run it in the background so it never blocks Talk mode.
+  - Manual "retrain now" endpoint for demos and testing.
+  - Threshold experiment script: replays the feedback log chronologically with different thresholds and reports the accuracy curve, to choose the minimum effective value.
+- Evaluation scripts:
+  - Leave-one-out over enrolled samples (DTW top-1/top-3; accuracy vs. coverage across MARGIN values).
+  - Phonetic engine eval: hold out phrases/words from profile building and measure word-level accuracy and top-3 accuracy on them, to show generalization to unseen words.
+
+## Data models (JSON + files on disk, no database)
+data/
+  phrases.json
+  contacts.json
+  enrollment_set.json                                  — built-in phonetically balanced phrases (text, emoji, phonemes)
+  lexicon/words.tsv                                    — word, frequency, canonical pronunciation(s)
+  audio/<phrase_id>/<sample_id>.wav
+  features/<extractor_name>/<phrase_id>/<sample_id>.npy
+  phonemes/<sample_or_attempt_id>.json (+ posteriors .npy)
+  images/<phrase_id>.<ext>
+  tts_cache/<sha1(text+voice_id)>.mp3
+  attempts/<attempt_id>.wav (+ features, phonemes)      — labeled attempts kept for training; unlabeled ones cleaned up periodically
+  feedback.jsonl                                       — one line per feedback event
+  profile/profile_v<N>.json, profile/current.json, profile/counters.json
+
+Phrase:
+{
+  "id": "uuid",
+  "text": "I want water",
+  "emoji": "💧" | null,
+  "image": "images/<id>.jpg" | null,
+  "origin": "enrollment" | "custom" | "pack",
+  "personal_word": false,
+  "phonemes": ["..."] | null,             // null for personal words
+  "created_at": "ISO8601",
+  "samples": [
+    {"id": "uuid", "source": "enroll" | "feedback", "created_at": "ISO8601"}
+  ]
+}
+
+Feedback event:
+{
+  "attempt_id": "uuid",
+  "timestamp": "ISO8601",
+  "shown": {"type": "phrase" | "generated", "phrase_id": "...", "text": "..."},
+  "correct": true | false,
+  "label": {"type": "phrase" | "text", "phrase_id": "...", "text": "..."} | null,   // null when "Skip"
+  "recognized_phonemes": ["..."],
+  "used_for_profile_version": N | null
+}
+
+Contact:
+{ "id": "mom", "name": "Mom", "handle": "+15551234567", "emoji": "👩" }
+
+Config (env / config file): ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, PHOTON_SERVICE_URL, FEATURE_EXTRACTOR (mfcc | hubert | wav2vec2), PHONEME_MODEL, MARGIN, ABSOLUTE_MAX, MAX_SAMPLES_PER_PHRASE, TRIM_TOP_DB, MIN_CLIP_SEC, MAX_CLIP_SEC, MIN_PHONEME_OCCURRENCES, LEXICON_SIZE, MAX_DECODE_WORDS, PROFILE_SMOOTHING_ALPHA, LM_WEIGHT, RETRAIN_MIN_NEW_EXAMPLES, HOLDOUT_FRACTION.
+
+All JSON writes are atomic (write a temp file, then rename) and guarded by a lock.
+
+## APIs (FastAPI)
+- GET  /                               → serves the web app
+- GET  /api/enrollment-set             → built-in phrases with per-phrase recording status
+- GET  /api/phrases                    → list phrases (sample counts, image URLs, origin, personal_word)
+- POST /api/phrases                    → create a custom phrase {text, emoji?, personal_word} (+ optional image upload)
+- DELETE /api/phrases/{id}             → delete a phrase and all its files
+- POST /api/phrases/{id}/samples       → upload one recording → {sample_id}
+- DELETE /api/phrases/{id}/samples/{sample_id}
+- POST /api/recognize                  → upload a recording → {attempt_id, confident, candidates: [{type: "phrase"|"generated", phrase_id?, text, emoji?, image?, score}] (top 3)}
+- POST /api/feedback                   → {attempt_id, correct, label?} → stores the event, updates templates/counters, may trigger a background retrain → {retrain_triggered: bool}
+- POST /api/feedback/undo              → {attempt_id} → reverts the last feedback for that attempt (within the undo window)
+- GET  /api/profile                    → phoneme coverage + per-phoneme example counts + progress toward next retrain + current profile version
+- POST /api/profile/retrain            → force a retrain (demo/testing)
+- GET  /api/tts?text=...               → cached or freshly generated ElevenLabs audio; 503 if unavailable (client falls back to speechSynthesis)
+- GET  /api/contacts                   → list contacts
+- POST /api/send                       → {text, contact_id} → forwards to the Photon service → {ok, error?}
+- (N2) GET /api/listener/stream        → SSE stream of spoken phrases for the listener screen
+- GET  /api/health                     → server, ffmpeg, phoneme model loaded, ElevenLabs key present, Photon service reachable
+
+## Integrations
+- ElevenLabs TTS (REST API via httpx) with an on-disk cache and browser speechSynthesis fallback.
+- Photon iMessage SDK via a local TS service (Mac with Messages signed in).
+- Hugging Face transformers phoneme recognizer (downloaded once, run locally on CPU/MPS).
+- CMUdict and/or phonemizer + espeak-ng for lexicon pronunciations.
+- Optional: Whisper (N5), HuBERT/wav2vec2 embeddings (N6).
+
+## Infrastructure requirements
+- A Mac (required for the Photon local iMessage SDK) running the FastAPI server, Photon TS service, and cloudflared/ngrok tunnel.
+- System ffmpeg installed; espeak-ng installed if phonemizer is used.
+- Python 3.10+ environment; Node.js for the TS service.
+- Phoneme model weights pre-downloaded before the demo (no network dependency at demo time).
+- .env.example documenting all keys/config.
+- One-command run script (e.g., `make dev` or a shell script) that starts the server, Photon service, and tunnel.
+
+# Development Roadmap
+
+## Phase 1 — Foundation (backbone)
+- Project scaffolding: Python package layout, FastAPI app, config loading from .env, static file serving, requirements.txt, .env.example, run script.
+- Disk-backed phrase store: phrases.json CRUD with atomic writes, directory layout, sample add/delete, image upload storage, origin/personal_word fields.
+- Audio preprocessing module: ffmpeg conversion of webm/mp4/wav to 16 kHz mono WAV, silence trim, normalization, min/max length validation. Unit-tested with sample files from both Chrome and iPhone Safari.
+- FeatureExtractor interface + MFCC implementation with CMVN; feature caching to .npy keyed by extractor name.
+- DTW whole-phrase matcher: fastdtw over all samples, length normalization, per-phrase min score, ranking, margin-based confidence, top-3 output.
+- Attempt store + feedback store (feedback.jsonl), POST /api/recognize (DTW-only for now), POST /api/feedback, /undo; labeled phrase attempts become new samples.
+- HTTPS tunnel setup documented and verified with iPhone Safari microphone access.
+
+## Phase 2 — Front end MVP (usable demo with whole-phrase matching)
+- Single-page vanilla web app shell with Talk / Setup mode switching and mobile-first, large-target styling.
+- Recorder utility: MediaRecorder wrapper handling mic permission, MIME type detection (webm vs mp4), press-and-hold (touch + mouse events), min/max length guards.
+- Setup mode: custom phrase creation (text + emoji or photo, personal-word toggle), record 3 samples with playback/re-record, phrase list management. (The guided built-in enrollment flow comes in Phase 4, once the enrollment set exists.)
+- Talk mode: hold-to-talk button, listening/thinking states, large result card.
+- Yes/No feedback buttons, correction screen (top 3, phrase grid, type, skip), undo toast, wired to /api/feedback.
+- Top-3 picker for unsure results.
+- Speech output: GET /api/tts with ElevenLabs + disk cache; client playback with speechSynthesis fallback.
+
+## Phase 3 — iMessage sending (Photon)
+- TypeScript Photon service: Node project, Photon local iMessage SDK integration, POST /send endpoint, error handling, README with Mac/Messages prerequisites.
+- contacts.json + GET /api/contacts.
+- POST /api/send proxy in FastAPI with timeout and clear error reporting.
+- "Send to <contact>" buttons on the confirmed result card with sent/failed feedback.
+- Health endpoint reporting Photon service reachability.
+
+## Phase 4 — Phonetic foundation + balanced enrollment
+- Choose the phoneme inventory and build the canonical symbol mapping (recognizer symbols ↔ lexicon symbols) with tests.
+- Phoneme recognizer module: load the chosen pretrained model, run it on cleaned audio, return the phoneme sequence + posteriors, cache them; measure CPU latency.
+- Pronunciation lexicon builder: frequency-ranked common-word list → canonical pronunciations → data/lexicon/words.tsv; G2P fallback for out-of-dictionary custom phrase words.
+- Enrollment coverage checker script + unit test.
+- Author the built-in enrollment set (~25–30 short, functional phrases with emoji) and iterate until it passes the coverage checker.
+- Guided enrollment UI: step through the built-in set, record 3x each, progress bar, resume where the user left off.
+- Aligner (weighted edit-distance alignment of recognized vs. expected phonemes) with unit tests.
+
+## Phase 5 — Phonetic profile + decoder (generalization)
+- Phonetic profile: confusion count matrix with deletion/insertion, generic prior, smoothing, versioned save/load; build the initial profile from enrollment samples (excluding personal words).
+- Phonetic decoder: word scoring with profile costs; beam-search sentence decoding with word-frequency prior and phrase-list bonus; top-K transcripts.
+- Hybrid ranker: merge DTW and decoder candidates; confidence rule (only saved phrases can be auto-confident); /api/recognize returns mixed candidates.
+- UI: show generated candidates with a distinct icon; generated results always go through the picker/confirmation before being spoken or sent.
+- Phoneme coverage screen in Setup (GET /api/profile).
+
+## Phase 6 — Feedback-driven retraining
+- Per-phoneme new-example counters updated from labeled feedback (via aligner).
+- Retrainer: background job triggered when a phoneme's counter reaches RETRAIN_MIN_NEW_EXAMPLES; rebuild rows, evaluate against a held-out slice, promote or roll back, reset counters.
+- POST /api/profile/retrain manual trigger; retrain status/progress shown on the coverage screen.
+- Threshold experiment script (replay feedback log with thresholds 3/5/10/20; report accuracy gain per retrain); update the default threshold from the results.
+
+## Phase 7 — Accuracy tuning + evaluation
+- Leave-one-out DTW evaluation script; tune MARGIN, ABSOLUTE_MAX, trim threshold, MFCC parameters.
+- Phonetic engine evaluation on held-out words (generalization to unseen words); tune PROFILE_SMOOTHING_ALPHA, LM_WEIGHT, LEXICON_SIZE, MAX_DECODE_WORDS.
+- Fit hybrid score calibration on labeled attempts.
+- Latency budget: measure end-to-end recognize latency; cap samples per phrase, cache features, limit beam width as needed.
+
+## Phase 8 — Nice-to-haves (only if time allows, in priority order)
+- N1 Phrase packs: JSON packs (café, bus, doctor's office, emergency) importable from Setup; added to the lexicon prior.
+- N2 Listener screen: /listener page subscribing via SSE; confirmed Talk mode results are broadcast and shown in large type.
+- N6 HuBERT/wav2vec2 DTW feature extractor behind a config switch; compare against MFCC with the eval script.
+- N5 Whisper second opinion: fuzzy-match the Whisper transcript to candidates and apply a configurable boost.
+- N3 Benchmark: Whisper vs. our engine on a public atypical-speech dataset (dataset TBD; license must allow this use), with numbers/chart for a slide.
+- N4 Custom ElevenLabs voice: configurable voice ID / voice setup flow.
+- N7 Acoustic-model fine-tuning of the phoneme recognizer on the user's labeled data (adapter/LoRA), if hardware allows.
+
+# Logical Dependency Chain
+1. Scaffolding + config + run script (everything depends on this).
+2. Phrase store (needed by enrollment, recognition, TTS, send).
+3. Audio preprocessing (needed before any features or phonemes).
+4. MFCC feature extractor + caching (needed by the DTW matcher).
+5. DTW matcher + confidence logic (testable from the command line with WAVs before any UI).
+6. Attempt + feedback stores and the recognize/feedback endpoints (the data foundation for all learning).
+7. HTTPS tunnel verified on iPhone (blocks any real-device testing).
+8. Front-end shell + recorder utility (first visible product).
+9. Custom-phrase Setup UI (enough to enroll and demo).
+10. Talk mode + result card + Yes/No feedback + correction + top-3 picker (first end-to-end demo: enroll → speak → card → feedback).
+11. TTS endpoint + client playback/fallback (spoken output). Steps 1–11 = demoable MVP.
+12. Photon TS service → contacts → send proxy → send buttons.
+13. Phoneme inventory mapping → phoneme recognizer → lexicon builder → coverage checker → authored enrollment set → guided enrollment UI → aligner.
+14. Phonetic profile → decoder → hybrid ranker → generated-candidate UI → coverage screen.
+15. Retraining counters → retrainer with held-out validation → threshold experiment.
+16. Evaluation + tuning across DTW and phonetic engine.
+17. Nice-to-haves in the order listed in Phase 8.
+
+Each step is independently testable. The whole-phrase demo path (steps 1–11) must work before starting the phonetic engine, so there is always a working demo even if generalization underperforms.
+
+# Risks and Mitigations
+- Phoneme recognizers are trained on typical speech and may perform poorly on the target users' speech (the same problem as mainstream ASR) → the per-user confusion profile is designed to absorb consistent errors; whole-phrase DTW remains the reliable primary path; generated results always require confirmation; measure honestly with the held-out-word eval.
+- Inconsistent productions (common in dysarthria/ALS) make sound-level patterns noisy → smoothing toward the prior, top-3 confirmation, and continued learning from feedback; present generalization as "suggestions" in the pitch, not guaranteed transcription.
+- ~25–30 phrases give only a few examples per phoneme → coverage checker enforces minimum occurrences; smoothing prevents overfitting; the coverage screen shows weak sounds; feedback data fills gaps over time.
+- Personal words would corrupt the phonetic profile → the personal_word flag excludes them from profile learning.
+- Mis-tapped feedback pollutes training data → large, distinct Yes/No buttons, undo toast, no training from unlabeled attempts, held-out validation with rollback on every retrain.
+- The retrain threshold (10 per sound) is a guess until measured → configurable, with a threshold experiment script to find the minimum effective value from real data.
+- Lexicon decoding is ambiguous (many words sound alike under a given profile) → word-frequency prior, phrase-list bonus, bounded vocabulary and sentence length, top-3 picker.
+- Symbol mismatch between recognizer output and lexicon pronunciations → a single canonical inventory with a tested mapping table.
+- Phoneme model latency/size on a laptop CPU → pre-download weights, cache per-clip results, measure latency early in Phase 4, keep the DTW path fast as a fallback.
+- iPhone Safari mic access requires HTTPS → always serve via cloudflared/ngrok; verify early.
+- iPhone records a different format (mp4/aac) than Chrome (webm/opus) → server-side ffmpeg normalization of every upload; the client detects a supported MIME type via MediaRecorder.isTypeSupported.
+- Similar-sounding phrases confuse the DTW matcher → top-3 picker; optional warning in Setup when a new phrase is acoustically close to an existing one.
+- ElevenLabs outage/quota/no key → disk cache + automatic browser speechSynthesis fallback.
+- Photon requires a Mac signed into Messages, and its exact SDK API is unconfirmed → isolate it behind a single localhost /send endpoint; confirm SDK details first in Phase 3; the demo still works without sending.
+- Background noise in a demo environment → silence trimming + normalization; hold-to-talk limits captured audio to the utterance.
+- Data corruption of JSON files → atomic writes with a lock.
+
+# Appendix
+
+## Research findings (as cited in the pitch; verify sources before putting on slides)
+- Google: standard speech recognition models don't work very well for people with non-standard speech (lovethework).
+- Down syndrome speech: best algorithm OpenAI at 67% word accuracy (chapman).
+- Severe dysarthria: standard systems' error rate close to or above 100% (arxiv).
+- Personalization reduced errors from 71% to 32% on average (arxiv).
+
+## Linguistic background (for the pitch and design rationale)
+- Phonemes: the distinct sounds of a language. The enrollment set is designed to cover the full General American English phoneme inventory, verified automatically by the coverage checker.
+- Phonological processes used in speech-language pathology to describe consistent sound-level patterns, e.g., gliding (/r/, /l/ → /w/), final consonant deletion, cluster reduction, stopping, fronting, devoicing. The phonetic profile learns these patterns statistically rather than hard-coding them.
+- Phonetically balanced reading passages used clinically (e.g., the "Rainbow Passage") are the inspiration for the enrollment set; Heard's version uses short, functional phrases instead, so the recordings are also useful as whole-phrase templates.
+
+## Technical specifications
+- Audio: 16 kHz, mono, 16-bit PCM WAV after preprocessing.
+- Enrollment: built-in phonetically balanced set of ~25–30 phrases x 3 recordings (~5 minutes), plus optional custom phrases / personal words.
+- Whole-phrase features: MFCC (MVP); HuBERT/wav2vec2 embeddings optional (N6).
+- Whole-phrase matching: DTW (fastdtw), length-normalized, phrase score = min over its samples.
+- Generalization: pretrained phoneme recognizer → per-user smoothed confusion profile → lexicon beam-search decoding with frequency prior.
+- Confidence: only saved phrases can be auto-confident (relative margin + absolute cap); everything else goes through the top-3 picker.
+- Feedback: explicit Yes/No + correction labels; phrase templates updated immediately; profile retrained per phoneme after RETRAIN_MIN_NEW_EXAMPLES (default 10) new examples, with held-out validation and rollback.
+- TTS: ElevenLabs primary with disk cache; browser speechSynthesis fallback.
+- Messaging: Photon local iMessage SDK in a TypeScript service on a Mac.
+- Storage: JSON + files on disk; no database; single user; no auth.
+
+## Open questions (resolve during implementation)
+- Exact Photon SDK package name and send API.
+- Phoneme recognizer checkpoint (candidate: facebook/wav2vec2-lv-60-espeak-cv-ft): output symbol set, license, CPU latency.
+- Source of the common-English frequency word list (and bigram data, if any) and its license; final LEXICON_SIZE.
+- The exact built-in enrollment phrase list (must pass the coverage checker).
+- Minimum effective retrain threshold per phoneme (from the threshold experiment; default 10).
+- Final MARGIN / ABSOLUTE_MAX / smoothing / LM weight values (from the evaluation scripts).
+- Which HuBERT/wav2vec2 checkpoint and layer to use for N6.
+- Whisper deployment for N5 (local model vs. hosted API).
+- Public dataset for the N3 benchmark (and its license terms).
+- Final product name.
+</PRD>
