@@ -1,6 +1,6 @@
 PYTHON ?= python3.13
 
-.PHONY: install dev test
+.PHONY: install dev test test-client
 
 install:
 	$(PYTHON) -m venv .venv
@@ -11,3 +11,6 @@ dev:
 
 test:
 	.venv/bin/pytest -q
+
+test-client:
+	node --experimental-default-type=module --test tests/*.test.mjs

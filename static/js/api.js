@@ -9,7 +9,7 @@ export async function requestJSON(path, options = {}) {
     const response = await fetch(path, { ...options, signal: controller.signal });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const detail = typeof data?.detail === 'string' ? data.detail : 'Could not complete that request. Please try again.';
+      const detail = typeof data?.detail === 'string' ? data.detail : data?.detail?.message || 'Could not complete that request. Please try again.';
       throw new Error(detail);
     }
     if (data === null) throw new Error('The server sent an unreadable response.');

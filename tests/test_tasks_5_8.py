@@ -36,7 +36,7 @@ class PhraseStoreDouble:
     def get_phrase(self, key):
         return self.phrases.get(key)
 
-    def get_audio_path(self, phrase_id, sample_id):
+    def sample_path(self, phrase_id, sample_id):
         return self.root / phrase_id / (sample_id + '.wav')
 
     def add_sample(self, phrase_id, audio_bytes, source='enroll'):
@@ -48,14 +48,14 @@ class PhraseStoreDouble:
         phrase = self.phrases[phrase_id]
         if not any(s.id == metadata['id'] for s in phrase.samples):
             phrase.samples.append(NS(**metadata))
-        path = self.get_audio_path(phrase_id, metadata['id'])
+        path = self.sample_path(phrase_id, metadata['id'])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(audio_bytes)
 
     def delete_sample(self, phrase_id, sample_id):
         phrase = self.phrases[phrase_id]
         phrase.samples = [s for s in phrase.samples if s.id != sample_id]
-        self.get_audio_path(phrase_id, sample_id).unlink(missing_ok=True)
+        self.sample_path(phrase_id, sample_id).unlink(missing_ok=True)
         return True
 
 
@@ -177,7 +177,7 @@ def test_retention_and_undo_restore_original_sample(stack):
     samples = {s.id: s for s in p.get_phrase('water').samples}
     assert set(samples) == {enrollment.id, old.id, recent.id}
     assert samples[old.id].created_at == old.created_at
-    assert p.get_audio_path('water', old.id).read_bytes() == b'old'
+    assert p.sample_path('water', old.id).read_bytes() == b'old'
 
 
 def test_enrollment_never_evicted(stack):
@@ -255,7 +255,14 @@ def test_api_pipeline_and_validation(stack, monkeypatch):
     template(stack, 'water', [[1, 0]] * 4)
     app = FastAPI()
     config = NS(MARGIN=.15, ABSOLUTE_MAX=.5, MAX_SAMPLES_PER_PHRASE=10)
-    preprocessor = NS(convert_to_wav=lambda content, mime: content, process=lambda content: (content, .5))
+    def process(content, mime):
+        from app.services.audio import AudioProcessingError
+        try:
+            audio, sr = sf.read(io.BytesIO(content))
+        except sf.LibsndfileError as exc:
+            raise AudioProcessingError('bad audio') from exc
+        return NS(samples=audio, sr=sr, wav_bytes=content)
+    preprocessor = NS(process=process)
     extractor = NS(extract=lambda audio, sr: np.array([[1, 0]] * 4))
     install_tasks_5_8(app, config=config, phrase_store=stack.phrases, preprocessor=preprocessor,
         extractor=extractor, feature_cache=stack.cache, data_dir=stack.root)

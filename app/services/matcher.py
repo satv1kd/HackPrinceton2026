@@ -45,7 +45,7 @@ class DTWMatcher:
             for sample in phrase.samples:
                 try:
                     template = feature_matrix(self.feature_cache.get_or_extract(
-                        phrase.id, sample.id, self.phrase_store.get_audio_path(phrase.id, sample.id)))
+                        phrase.id, sample.id, self.phrase_store.sample_path(phrase.id, sample.id)))
                     if query.shape[1] != template.shape[1]:
                         raise ValueError('Feature dimensions differ; invalidate old caches')
                     total, path = fastdtw(query, template, dist=distance)
@@ -56,7 +56,7 @@ class DTWMatcher:
                     log.warning('Skipping invalid template %s/%s', phrase.id, sample.id, exc_info=True)
             if scores:
                 candidates.append(MatchCandidate(phrase_id=phrase.id, text=phrase.text,
-                    emoji=phrase.emoji, image=phrase.image, score=min(scores)))
+                    emoji=phrase.emoji, image=f'/api/phrases/{phrase.id}/image' if phrase.image else None, score=min(scores)))
         candidates.sort(key=lambda item: (item.score, item.phrase_id))
         return MatchResult(attempt_id=str(uuid4()), confident=self._is_confident(candidates), candidates=candidates[:3])
 

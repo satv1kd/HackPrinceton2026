@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import UUID
 
 _thread_lock = threading.RLock()
+_held = threading.local()
 
 
 def attempt_key(value):
@@ -36,12 +37,19 @@ def atomic_json(path, value):
 
 @contextmanager
 def data_lock(data_dir):
-    """All phrase mutations must share this lock at integration (not nest it)."""
-    data_dir = Path(data_dir)
+    """Reentrant across shared services; serializes threads and local processes."""
+    data_dir = Path(data_dir).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
-    with _thread_lock, (data_dir / '.tasks-5-8.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
+    with _thread_lock:
+        held = getattr(_held, 'paths', set())
+        if data_dir in held:
             yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            return
+        with (data_dir / '.tasks-5-8.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            _held.paths = held | {data_dir}
+            try:
+                yield
+            finally:
+                _held.paths = held
+                fcntl.flock(lock, fcntl.LOCK_UN)

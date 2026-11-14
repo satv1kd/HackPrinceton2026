@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.deps import get_store
 from app.routers import phrases
 from app.services.audio import ffmpeg_available
+from app.task_integration import foundation_services, install_tasks_5_8
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -23,6 +24,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Heard", lifespan=lifespan)
 app.include_router(phrases.router)
+install_tasks_5_8(app, services_factory=foundation_services)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

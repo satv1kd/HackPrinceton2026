@@ -1,9 +1,0 @@
-# Supplemental requirements; merge with task 1's requirements on integration.
-fastapi>=0.104.0
-python-multipart>=0.0.6
-numpy>=1.24.0
-fastdtw>=0.3.4
-soundfile>=0.12.0
-# Verification only
-pytest>=8.0
-httpx>=0.25.0

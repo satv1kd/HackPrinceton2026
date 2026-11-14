@@ -22,8 +22,11 @@ class Settings(BaseSettings):
 
     FEATURE_EXTRACTOR: str = "mfcc"
     MARGIN: float = 0.15
-    ABSOLUTE_MAX: float = 50.0
+    # Path-normalized cosine distance is in [0, 2]; tune on real recordings.
+    ABSOLUTE_MAX: float = 0.75
     MAX_SAMPLES_PER_PHRASE: int = 10
+    DTW_METRIC: str = 'cosine'
+    UNDO_WINDOW_SECONDS: float = 10
 
     TRIM_TOP_DB: float = 20
     MIN_CLIP_SEC: float = 0.3

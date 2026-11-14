@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import Phrase, Sample
+from app.services.task_io import data_lock
 
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
 
@@ -62,8 +63,9 @@ class PhraseStore:
         self._lock = threading.RLock()
         for d in (self.data_dir, self.audio_dir, self.images_dir):
             d.mkdir(parents=True, exist_ok=True)
-        if not self.phrases_file.exists():
-            atomic_write_json(self.phrases_file, [])
+        with data_lock(self.data_dir):
+            if not self.phrases_file.exists():
+                atomic_write_json(self.phrases_file, [])
 
     # -- internal -----------------------------------------------------------
     def _load(self) -> list[Phrase]:
@@ -89,11 +91,11 @@ class PhraseStore:
 
     # -- phrases ------------------------------------------------------------
     def list_phrases(self) -> list[Phrase]:
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             return self._load()
 
     def get_phrase(self, phrase_id: str) -> Phrase:
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             return self._find(self._load(), phrase_id)
 
     def create_phrase(
@@ -114,14 +116,14 @@ class PhraseStore:
             origin=origin,
             phonemes=None if personal_word else phonemes,
         )
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrases.append(phrase)
             self._save(phrases)
         return phrase
 
     def delete_phrase(self, phrase_id: str) -> None:
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrase = self._find(phrases, phrase_id)
             phrases.remove(phrase)
@@ -135,7 +137,7 @@ class PhraseStore:
         ext = ext.lower() if ext.startswith(".") else f".{ext.lower()}"
         if ext not in ALLOWED_IMAGE_EXTS:
             raise ValueError(f"Unsupported image type {ext!r}")
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrase = self._find(phrases, phrase_id)
             old = self.image_path(phrase)
@@ -148,6 +150,20 @@ class PhraseStore:
             return phrase
 
     # -- samples ------------------------------------------------------------
+    def restore_sample(self, phrase_id: str, metadata: dict, wav_bytes: bytes) -> Sample:
+        """Restore an evicted sample exactly for feedback undo (idempotent)."""
+        sample = Sample.model_validate(metadata)
+        with data_lock(self.data_dir), self._lock:
+            phrases = self._load()
+            phrase = self._find(phrases, phrase_id)
+            if any(s.id == sample.id for s in phrase.samples):
+                return sample
+            atomic_write_bytes(self.sample_path(phrase_id, sample.id), wav_bytes)
+            phrase.samples.append(sample)
+            phrase.samples.sort(key=lambda s: (s.created_at, s.id))
+            self._save(phrases)
+        return sample
+
     def add_sample(
         self,
         phrase_id: str,
@@ -161,7 +177,7 @@ class PhraseStore:
         (handled by `evict_overflow`, called separately so callers can clean caches).
         """
         sample = Sample(source=source, duration_sec=duration_sec)
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrase = self._find(phrases, phrase_id)
             atomic_write_bytes(self.sample_path(phrase_id, sample.id), wav_bytes)
@@ -170,7 +186,7 @@ class PhraseStore:
         return sample
 
     def delete_sample(self, phrase_id: str, sample_id: str) -> None:
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrase = self._find(phrases, phrase_id)
             before = len(phrase.samples)
@@ -183,7 +199,7 @@ class PhraseStore:
     def evict_overflow(self, phrase_id: str, max_samples: int) -> list[str]:
         """Drop the oldest "feedback" samples beyond `max_samples`. Enrollment samples are
         never evicted (PRD F4). Returns the evicted sample ids."""
-        with self._lock:
+        with data_lock(self.data_dir), self._lock:
             phrases = self._load()
             phrase = self._find(phrases, phrase_id)
             overflow = len(phrase.samples) - max_samples

@@ -1,7 +1,6 @@
 """Transactional feedback journal with compensating template updates.
 
-PhraseStore must expose get_audio_path and (when evicting) restore_sample.
-See docs/tasks-5-8-integration.md for the shared lock and restoration contract.
+Uses the foundation's PhraseStore plus its sample-restoration extension.
 """
 import base64
 import json
@@ -11,6 +10,7 @@ from uuid import uuid4
 
 from app.services.attempts import utcnow
 from app.services.task_io import atomic_bytes, atomic_json, attempt_key, data_lock
+from app.services.storage import NotFoundError
 
 
 class FeedbackConflict(ValueError):
@@ -62,14 +62,20 @@ class FeedbackStore:
         return self.backup_dir / (attempt_key(event_id) + '.json')
 
     def _delete_sample(self, phrase_id, sample_id):
-        self.phrase_store.delete_sample(phrase_id, sample_id)
+        try:
+            self.phrase_store.delete_sample(phrase_id, sample_id)
+        except NotFoundError:
+            pass  # Replaying a partially completed undo must be safe.
         if self.feature_cache:
             self.feature_cache.invalidate(phrase_id, sample_id)
 
     def _restore(self, snapshot):
         if not snapshot:
             return
-        phrase = self.phrase_store.get_phrase(snapshot['phrase_id'])
+        try:
+            phrase = self.phrase_store.get_phrase(snapshot['phrase_id'])
+        except NotFoundError:
+            return
         # Explicit phrase deletion takes precedence over undo.
         if phrase is None:
             return
@@ -116,7 +122,7 @@ class FeedbackStore:
             metadata = sample.model_dump(mode='json') if hasattr(sample, 'model_dump') else dict(vars(sample))
             metadata['created_at'] = str(metadata['created_at'])
             evicted.append({'metadata': metadata, 'audio': base64.b64encode(
-                Path(self.phrase_store.get_audio_path(phrase.id, sample.id)).read_bytes()).decode()})
+                Path(self.phrase_store.sample_path(phrase.id, sample.id)).read_bytes()).decode()})
         return {'phrase_id': phrase.id, 'before_ids': [s.id for s in phrase.samples], 'evicted': evicted}
 
     @staticmethod
@@ -135,7 +141,10 @@ class FeedbackStore:
                 raise ValueError('A positive response requires an explicit label')
             phrase = None
             if label and label['type'] == 'phrase':
-                phrase = self.phrase_store.get_phrase(label['phrase_id'])
+                try:
+                    phrase = self.phrase_store.get_phrase(label['phrase_id'])
+                except NotFoundError as exc:
+                    raise FileNotFoundError('Phrase no longer exists') from exc
                 if phrase is None:
                     raise FileNotFoundError('Phrase no longer exists')
             previous = active_feedback(read_events(self.feedback_file)).get(key)

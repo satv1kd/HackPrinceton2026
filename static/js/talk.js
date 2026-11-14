@@ -140,6 +140,12 @@ export class TalkMode {
     try {
       const started = performance.now();
       const response = await postJSON('/api/feedback', { attempt_id: attemptId, correct, label });
+      if (candidate && this.result?.attempt_id === attemptId) {
+        document.getElementById('result-heading').textContent = 'YOUR WORDS';
+        document.getElementById('result-text').textContent = `${candidate.emoji || '💬'} ${candidate.text}`;
+        document.getElementById('candidate-list').replaceChildren();
+        document.getElementById('feedback-buttons').hidden = true;
+      }
       this.status.textContent = correct ? 'Thank you. Your response is saved.' : 'Thanks for letting us know. You can try again.';
       const duration = Math.min(8000, Date.parse(response.undo_until) - Date.now(), 10000 - (performance.now() - started));
       this.app.showToast('Response saved', duration, async () => {
