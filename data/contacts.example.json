@@ -1,0 +1,14 @@
+[
+  {
+    "id": "mom",
+    "name": "Mom",
+    "handle": "+15551234567",
+    "emoji": "👩"
+  },
+  {
+    "id": "cafe",
+    "name": "Café",
+    "handle": "cafe@example.com",
+    "emoji": "☕"
+  }
+]

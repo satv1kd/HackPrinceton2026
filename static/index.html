@@ -2,12 +2,56 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Heard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#173e38">
+  <title>Heard — Your words, understood</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
 </head>
 <body>
-  <!-- Placeholder; the mobile web client is built in a later task. -->
-  <h1>Heard</h1>
-  <p>Server is running. API docs: <a href="/docs">/docs</a></p>
+  <a class="skip-link" href="#app">Skip to main content</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Heard home"><span aria-hidden="true">◖</span> heard<span class="brand-dot">.</span></a>
+    <span class="tagline">Your words, understood.</span>
+  </header>
+  <main id="app">
+    <div class="mode-switch" role="tablist" aria-label="App mode">
+      <button id="talk-tab" role="tab" aria-selected="true" aria-controls="talk-mode">Talk</button>
+      <button id="setup-tab" role="tab" aria-selected="false" aria-controls="setup-mode" tabindex="-1">Setup</button>
+    </div>
+    <section id="talk-mode" role="tabpanel" aria-labelledby="talk-tab">
+      <p class="eyebrow">A LITTLE SPACE TO BE HEARD</p>
+      <h1>What would you like to say?</h1>
+      <p class="intro" id="record-help">Hold the button while you speak. Release when you’re finished.</p>
+      <button id="talk-btn" class="talk-button" aria-describedby="record-help" aria-pressed="false">
+        <svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><rect x="17" y="5" width="14" height="26" rx="7" stroke="currentColor" stroke-width="3"/><path d="M10 23v2a14 14 0 0 0 28 0v-2M24 39v6M17 45h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span class="label">Hold to talk</span>
+      </button>
+      <button id="toggle-record-btn" class="text-button">Or tap to start / stop</button>
+      <p id="talk-status" class="status" role="status" aria-live="polite">Ready when you are.</p>
+      <section id="result-card" class="result-card" aria-label="Recognition result" hidden>
+        <p id="result-heading" class="eyebrow">DID WE HEAR YOU RIGHT?</p>
+        <p id="result-text" class="result-text"></p>
+        <div id="candidate-list" class="candidate-list"></div>
+        <div id="feedback-buttons" class="feedback-buttons" hidden>
+          <button id="yes-btn" class="feedback-btn yes">✓ Yes, that’s right</button>
+          <button id="no-btn" class="feedback-btn no">✕ No</button>
+        </div>
+        <!-- Filled only after the result is confirmed; see talk.js. -->
+        <div id="send-buttons" class="send-buttons" hidden></div>
+      </section>
+      <p class="quiet-note">Take your time. Your voice belongs here.</p>
+    </section>
+    <section id="setup-mode" role="tabpanel" aria-labelledby="setup-tab" hidden>
+      <p class="eyebrow">MAKE IT YOURS</p>
+      <h1>Your phrases</h1>
+      <p class="intro">Familiar words and everyday phrases, in your own voice.</p>
+      <p id="setup-status" role="status"></p>
+      <div id="phrase-list" class="phrase-list"></div>
+      <div id="setup-editor"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" hidden><span id="toast-message" role="status"></span><button id="toast-action" hidden>Undo</button></div>
+  <noscript>Heard needs JavaScript enabled to record your voice.</noscript>
+  <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

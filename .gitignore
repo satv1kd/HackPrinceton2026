@@ -26,9 +26,26 @@ node_modules/
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
+venv/
 .pytest_cache/
 
-# Runtime data (recordings, features, caches)
-data/
+# Runtime data: recordings, features, caches, profiles, user contacts.
+# Listed per-directory rather than ignoring all of data/, so tracked
+# config such as data/contacts.example.json stays committable.
+data/audio/
+data/features/
+data/phonemes/
+data/attempts/
+data/images/
+data/tts_cache/
+data/profile/
+data/lexicon/
+data/contacts.json
+data/feedback.jsonl
+data/phrases.json
+data/feedback-backups/
+# Runtime lock files the app writes while it is running.
+data/*.lock
+data/.*.lock

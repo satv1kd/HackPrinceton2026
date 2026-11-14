@@ -19,11 +19,15 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: str = ""
     ELEVENLABS_VOICE_ID: str = "21m00Tcm4TlvDq8ikWAM"
     PHOTON_SERVICE_URL: str = "http://localhost:3001"
+    PHOTON_TIMEOUT_SEC: float = 10.0
 
     FEATURE_EXTRACTOR: str = "mfcc"
     MARGIN: float = 0.15
-    ABSOLUTE_MAX: float = 50.0
+    # Path-normalized cosine distance is in [0, 2]; tune on real recordings.
+    ABSOLUTE_MAX: float = 0.75
     MAX_SAMPLES_PER_PHRASE: int = 10
+    DTW_METRIC: str = 'cosine'
+    UNDO_WINDOW_SECONDS: float = 10
 
     TRIM_TOP_DB: float = 20
     MIN_CLIP_SEC: float = 0.3
