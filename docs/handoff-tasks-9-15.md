@@ -169,16 +169,45 @@ The ranking is still right, and `confident: false` is the correct answer — a
 voice the app has not been enrolled on should go to the top-3 picker, not be
 spoken aloud. This is the app being speaker-dependent on purpose.
 
-One number to watch: 0.7519 is a hair over `ABSOLUTE_MAX` (0.75), so that
-match was one rounding away from being dropped entirely and showing "no
-match". `config.py` already says to tune that on real recordings. **Do it
-with the actual speaker before the demo** — too low and their words are
-rejected outright, which is the worst failure this app can have.
+### What the thresholds actually do
+
+Both live only in `DTWMatcher._is_confident`. Neither one drops a candidate:
+a phrase scoring worse than `ABSOLUTE_MAX` still appears in the top-3 picker,
+it just is not spoken without asking. So the two ways to get it wrong are:
+
+- **too tight** — the app asks about things it got right. More tapping, which
+  for some users is the expensive part, but nothing is lost.
+- **too loose** — the app says the wrong sentence out loud, unasked, to
+  whoever is standing there. Recoverable, but it is the failure that costs
+  the user something in front of another person.
+
+`MARGIN` is *relative*: `(second - best) / second`, not a difference. 0.15
+means the runner-up has to be 15% worse, so it scales with the absolute
+distances rather than needing to be re-picked alongside them.
+
+### Tuning them
+
+```bash
+python scripts/tune_thresholds.py
+```
+
+No new recordings needed. Every enrolled phrase already holds several
+samples of the same words by the same person, so the script holds each one
+out and matches it against the rest — exactly what recognition does at
+runtime. It reports how far apart two recordings of the same phrase land
+(which `ABSOLUTE_MAX` must sit above) and the gap to the nearest other
+phrase (which `MARGIN` must sit below), then suggests values with headroom
+in the safe direction. It also names any recording that matched the *wrong*
+phrase first, which no threshold can fix — those phrases need re-recording
+or need to be less alike.
+
+**Run it with the actual speaker's recordings before the demo.** The
+defaults in `config.py` were picked before anyone had recorded anything.
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 217 pass (needs ffmpeg)
+python -m pytest tests/ -q      # 226 pass (needs ffmpeg)
 node --test tests/client-ui.test.mjs       # 32
 node --test tests/photon-service.test.mjs  # 29
 node --test tests/send.test.mjs            # 20
