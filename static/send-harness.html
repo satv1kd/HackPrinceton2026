@@ -1,0 +1,131 @@
+<!doctype html>
+<!--
+  Development harness for static/js/send.js (Task 13).
+
+  NOT part of the app. The real Talk-mode result card (Task 10) will import
+  send.js directly; this page stubs /api/contacts and /api/send so the send
+  buttons can be exercised before the server and the card exist. Open it with
+  any static server from the repo root, e.g.
+
+      python3 -m http.server 8777
+      open http://localhost:8777/static/send-harness.html
+
+  Delete once Task 10's card is wired up, or keep it as a way to look at the
+  button states without a Mac running Photon.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Send buttons harness</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --line:#ccc; --accent:#0b5cad; --ok:#116633; --bad:#99231c; }
+  body { font:16px/1.5 system-ui,-apple-system,sans-serif; margin:0; padding:16px;
+         background:var(--bg); color:var(--fg); }
+  h1 { font-size:1.1rem; }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 16px; }
+  label { display:block; padding:4px 0; }
+  .card { border:2px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  .card-text { font-size:1.6rem; font-weight:600; margin:0 0 12px; }
+  /* Mirrors the PRD's large-target rule so the buttons are seen at real size. */
+  .send-row { display:flex; flex-direction:column; gap:12px; }
+  .send-button { min-height:64px; font-size:1.25rem; font-weight:600;
+                 border:3px solid var(--accent); border-radius:12px;
+                 background:#fff; color:var(--accent); cursor:pointer; }
+  .send-button[data-state="sending"] { opacity:.6; }
+  .send-button[data-state="sent"]    { border-color:var(--ok);  color:var(--ok);  }
+  .send-button[data-state="failed"]  { border-color:var(--bad); color:var(--bad); }
+  .send-notice { font-size:1.1rem; color:#555; }
+  #log { white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:.85rem;
+         background:#f4f4f4; border-radius:8px; padding:8px; margin-top:16px; }
+</style>
+</head>
+<body>
+<h1>send.js harness <small>(Task 13)</small></h1>
+
+<fieldset>
+  <legend>Stubbed <code>/api/send</code> outcome</legend>
+  <label><input type="radio" name="mode" value="ok" checked> success</label>
+  <label><input type="radio" name="mode" value="photon-failure"> Photon reports failure</label>
+  <label><input type="radio" name="mode" value="network"> network error</label>
+  <label><input type="radio" name="mode" value="404"> unknown contact (HTTP 404)</label>
+</fieldset>
+
+<fieldset>
+  <legend>Stubbed <code>/api/contacts</code></legend>
+  <label><input type="radio" name="contacts" value="two" checked> two contacts</label>
+  <label><input type="radio" name="contacts" value="none"> no contacts configured</label>
+  <label><input type="radio" name="contacts" value="error"> contacts endpoint broken</label>
+</fieldset>
+
+<fieldset>
+  <legend>Confirmation gate</legend>
+  <label><input type="radio" name="confirmed" value="yes" checked> confirmed (Yes / picker tap)</label>
+  <label><input type="radio" name="confirmed" value="no"> not confirmed &mdash; must render nothing</label>
+</fieldset>
+
+<button id="render" style="min-height:48px;font-size:1.1rem;">Render result card</button>
+
+<div class="card">
+  <p class="card-text" id="text">I want water</p>
+  <div id="buttons"></div>
+</div>
+
+<div id="log">ready</div>
+
+<script type="module">
+import { renderSendButtons, loadContacts } from "./js/send.js";
+
+const log = (message) => {
+  const el = document.getElementById("log");
+  el.textContent = `${new Date().toLocaleTimeString()}  ${message}\n` + el.textContent;
+};
+const pick = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
+
+const CONTACTS = [
+  { id: "mom",  name: "Mom",  emoji: "👩", handle_hint: "…4567" },
+  { id: "cafe", name: "Café", emoji: "☕", handle_hint: "c…@example.com" },
+];
+
+// Stand in for the FastAPI server so the buttons can be driven without it.
+window.fetch = async (url, options = {}) => {
+  log(`fetch ${options.method || "GET"} ${url}`);
+  if (String(url).includes("/api/contacts")) {
+    const mode = pick("contacts");
+    if (mode === "error") return new Response("boom", { status: 500 });
+    const body = mode === "none" ? [] : CONTACTS;
+    return new Response(JSON.stringify(body), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (String(url).includes("/api/send")) {
+    log(`  body ${options.body}`);
+    const mode = pick("mode");
+    if (mode === "network") throw new TypeError("Failed to fetch");
+    if (mode === "404") {
+      return new Response(JSON.stringify({ detail: "no contact with id 'nobody'" }),
+        { status: 404, headers: { "Content-Type": "application/json" } });
+    }
+    const payload = mode === "ok"
+      ? { ok: true }
+      : { ok: false, error: "Messages not signed in" };
+    return new Response(JSON.stringify(payload), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response("not stubbed", { status: 404 });
+};
+
+document.getElementById("render").addEventListener("click", async () => {
+  await loadContacts({ force: true });   // harness only: re-read the radio buttons
+  await renderSendButtons({
+    container: document.getElementById("buttons"),
+    text: document.getElementById("text").textContent,
+    confirmed: pick("confirmed") === "yes",
+    onStatus: (state, detail) => log(`onStatus ${state} ${JSON.stringify(detail)}`),
+  });
+  log("rendered");
+});
+</script>
+</body>
+</html>
