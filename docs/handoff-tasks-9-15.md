@@ -118,13 +118,11 @@ make test-all
 
 ## Known gaps
 
-- **Nothing has been through a microphone.** The UI has now been driven in a
-  real browser — Setup Mode renders and saves a phrase, the sample recorder
-  opens, the top-3 picker marks generated text "Suggested", the correction
-  flow opens with saved phrases and the inline text form, the send buttons
-  render per contact, and `/api/health` reports correctly — but every path
-  that needs audio stops at ffmpeg, which is not installed here. **Record one
-  phrase and recognise it before demoing**; that is the only untested link.
+- **Nothing has been through a real microphone.** The UI has been driven in
+  a browser, and the audio path has been exercised end to end with
+  synthesised speech (see "What the audio path actually does" below), but no
+  human has spoken into it. A person with a speech difference is the case the
+  whole app exists for and the one thing none of this covers.
 - **`/api/send` has never reached Photon**, since there is no account. The
   relay was exercised end to end in stub mode.
 - **Photon has never been called live.** The request shapes are now checked
@@ -133,9 +131,8 @@ make test-all
   the field names are the SDK's rather than a guess. What is still open is
   behaviour: whether `content.format: "plain"` is accepted (the SDK types it
   as a free string), and whether the live service matches its own types.
-- **17 Python tests fail on a machine without ffmpeg** (`test_audio.py`,
-  `test_talk_integration.py`). That is the whole of the failure set: 200 pass.
-  Install ffmpeg and they go green.
+- **ffmpeg is required**, and 17 Python tests fail without it. With it
+  installed the suite is 217/217.
 - **`tests/talk.test.mjs` needs `npm install`** — it imports jsdom. Every
   other JS suite is dependency-free on purpose and runs on a clean checkout.
 - **Phase 4 phonetics is out of scope of the 15-task list** but is in the
@@ -143,10 +140,45 @@ make test-all
   Real-model latency is still unmeasured (the weights are ~1 GB):
   `python scripts/measure_phoneme_latency.py --budget 1.5 data/audio/`.
 
+## What the audio path actually does
+
+Enrolled two phrases with three synthesised samples each (macOS `say`), then
+recognised fresh utterances. Scores are path-normalised cosine distance, so
+lower is better; `MARGIN` is 0.15 and `ABSOLUTE_MAX` is 0.75.
+
+**Same voice, different speaking rate** — the easy case:
+
+| Said | Top match | Score | Runner-up | Confident |
+|---|---|---|---|---|
+| I want water | I want water | ~0 | 0.69 | yes |
+| I need the bathroom | I need the bathroom | ~0 | 0.67 | yes |
+
+Near-zero because `say` is deterministic and DTW normalises time away, so
+this proves the pipeline runs — ffmpeg decode, MFCC, DTW, ranking — and
+nothing about how it behaves on a human.
+
+**Enrolled with one voice, probed with another** (US female → UK male), which
+is a harsher test than the app actually faces:
+
+| Said | Top match | Score | Runner-up | Confident |
+|---|---|---|---|---|
+| I want water | I want water | 0.7519 | 0.8150 | no |
+| I need the bathroom | I need the bathroom | 0.6677 | 0.7694 | no |
+
+The ranking is still right, and `confident: false` is the correct answer — a
+voice the app has not been enrolled on should go to the top-3 picker, not be
+spoken aloud. This is the app being speaker-dependent on purpose.
+
+One number to watch: 0.7519 is a hair over `ABSOLUTE_MAX` (0.75), so that
+match was one rounding away from being dropped entirely and showing "no
+match". `config.py` already says to tune that on real recordings. **Do it
+with the actual speaker before the demo** — too low and their words are
+rejected outright, which is the worst failure this app can have.
+
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 200 pass, 17 fail without ffmpeg
+python -m pytest tests/ -q      # 217 pass (needs ffmpeg)
 node --test tests/client-ui.test.mjs       # 32
 node --test tests/photon-service.test.mjs  # 29
 node --test tests/send.test.mjs            # 20

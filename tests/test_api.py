@@ -15,9 +15,16 @@ def _upload(client, phrase_id, raw, mime="audio/webm", name="rec.webm"):
 
 
 def test_health_and_index(client):
+    # Task 15 replaced task 1's flat {status, ffmpeg} with a per-dependency
+    # report, so each check now reports its own reason rather than collapsing
+    # to one boolean. Only ffmpeg and disk space decide the overall status:
+    # a missing ElevenLabs key or an unreachable Photon relay is a degraded
+    # feature, not a broken app.
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok" and r.json()["ffmpeg"] is True
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["ffmpeg"]["ok"] is True
     r = client.get("/")
     assert r.status_code == 200 and "Heard" in r.text
 
