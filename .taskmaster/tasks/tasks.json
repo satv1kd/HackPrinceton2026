@@ -1,0 +1,286 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Project scaffolding, config loading, and run script",
+        "description": "Create the Python package layout, FastAPI app, .env-based config, static file serving, requirements.txt, the data/ directory layout, and a one-command run script.",
+        "details": "Python 3.10+ package layout with a FastAPI app serving the client as static files (GET /). requirements.txt: fastapi, uvicorn, librosa, numpy, fastdtw, soundfile, httpx, transformers, torch, rapidfuzz. System ffmpeg required. Config loaded from .env with documented defaults for every key in the PRD: ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, PHOTON_SERVICE_URL, FEATURE_EXTRACTOR, PHONEME_MODEL, MARGIN, ABSOLUTE_MAX, MAX_SAMPLES_PER_PHRASE, TRIM_TOP_DB, MIN_CLIP_SEC, MAX_CLIP_SEC, MIN_PHONEME_OCCURRENCES, LEXICON_SIZE, MAX_DECODE_WORDS, PROFILE_SMOOTHING_ALPHA, LM_WEIGHT, RETRAIN_MIN_NEW_EXAMPLES, HOLDOUT_FRACTION. Create data/ per the PRD layout (audio, features, phonemes, images, tts_cache, attempts, lexicon, profile). Add GET /api/health reporting server status, ffmpeg presence, phoneme model loaded, ElevenLabs key present, Photon reachable (fields may be stubbed until their features land). Run script (make dev or shell script) starts server + Photon service + tunnel.",
+        "testStrategy": "Start the server and confirm GET / returns the app shell and GET /api/health returns the expected fields. Unit-test config loading for defaults, .env overrides, and type coercion of numeric thresholds.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Disk-backed phrase store with atomic writes",
+        "description": "Implement phrases.json CRUD, the on-disk directory layout, sample add/delete, image upload storage, and the origin / personal_word fields.",
+        "details": "Phrase record per the PRD: id, text, emoji, image, origin (enrollment|custom|pack), personal_word, phonemes (null for personal words), created_at, samples[] with id/source/created_at. All JSON writes atomic (temp file then rename) and guarded by a lock. Files live at data/audio/<phrase_id>/<sample_id>.wav and data/images/<phrase_id>.<ext>. Deleting a phrase removes all of its files. Endpoints: GET /api/phrases, POST /api/phrases (with optional image upload), DELETE /api/phrases/{id}, POST /api/phrases/{id}/samples, DELETE /api/phrases/{id}/samples/{sample_id}.",
+        "testStrategy": "Unit-test create/read/update/delete round-trips, that deleting a phrase removes its audio/feature/image files, and that concurrent writes under the lock never leave a truncated phrases.json. Verify atomicity by killing a write mid-flight in a test harness.",
+        "priority": "high",
+        "dependencies": [1],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Audio preprocessing pipeline",
+        "description": "ffmpeg conversion of webm/opus and mp4/aac uploads to 16 kHz mono 16-bit PCM WAV, silence trimming, normalization, and min/max length validation.",
+        "details": "Accept a raw multipart blob with its MIME type. Convert any input format to 16 kHz mono 16-bit PCM WAV via the system ffmpeg binary. Trim leading/trailing silence with librosa.effects.trim using TRIM_TOP_DB, then peak/RMS normalize. Reject clips shorter than MIN_CLIP_SEC after trimming with a user-facing \"didn't catch that\" error; cap at MAX_CLIP_SEC. This module is a prerequisite for all feature extraction and phoneme recognition.",
+        "testStrategy": "Unit-test with real fixture recordings from both Chrome (webm/opus) and iPhone Safari (mp4/aac): assert output sample rate, channel count, and bit depth; assert silence-only and too-short clips are rejected; assert a loud and a quiet recording normalize to comparable RMS.",
+        "priority": "high",
+        "dependencies": [1],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "FeatureExtractor interface, MFCC implementation, and feature caching",
+        "description": "Define a pluggable FeatureExtractor interface, implement MFCC with deltas and CMVN, and cache features to .npy keyed by extractor name.",
+        "details": "FeatureExtractor interface so MFCC can later be swapped for HuBERT/wav2vec2 embeddings (N6) via the FEATURE_EXTRACTOR config value. MVP implementation: 13 MFCC coefficients plus deltas with per-utterance mean/variance normalization, returned as a frames x dims matrix. Cache to data/features/<extractor_name>/<phrase_id>/<sample_id>.npy so the extractor name partitions the cache and switching extractors cannot corrupt it. Enrolled samples must never be re-extracted during matching.",
+        "testStrategy": "Unit-test output shape and that CMVN yields near-zero mean and unit variance per dimension. Assert a second extraction of the same sample hits the cache (no recomputation) and that changing FEATURE_EXTRACTOR writes to a separate cache path.",
+        "priority": "high",
+        "dependencies": [3],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "DTW whole-phrase matcher with confidence and top-3 output",
+        "description": "Score a query recording against every saved sample with length-normalized DTW, rank phrases by their best sample, and apply the margin-based confidence rule.",
+        "details": "Compute fastdtw distance (cosine or euclidean) between the query features and every saved sample of every phrase. Normalize each distance by DTW path length so phrases of different lengths are comparable. Phrase score = its minimum sample distance. Rank phrases ascending. Confidence rule: confident only if the top candidate is a saved phrase AND (second - best)/second >= MARGIN AND best <= ABSOLUTE_MAX; otherwise confident=false with the top 3 returned. Must be testable from the command line against WAV files before any UI exists.",
+        "testStrategy": "Build a CLI harness that matches a held-out WAV against an enrolled phrase set and prints ranked candidates with scores. Unit-test that length normalization makes short and long phrases comparable, and that the confidence rule flips to unsure at a known margin boundary.",
+        "priority": "high",
+        "dependencies": [2, 4],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Attempt store, feedback store, and the recognize/feedback endpoints",
+        "description": "Implement the attempt store, feedback.jsonl, POST /api/recognize (DTW-only for now), POST /api/feedback, and POST /api/feedback/undo; labeled phrase attempts become new samples.",
+        "details": "This is the data foundation for all learning. POST /api/recognize returns {attempt_id, confident, candidates: top 3 with type/phrase_id/text/emoji/image/score}; the server retains the cleaned audio and features for that attempt under data/attempts/. POST /api/feedback accepts {attempt_id, correct, label?} and appends one line to data/feedback.jsonl using the PRD's feedback event shape. A labeled attempt whose label is a saved phrase is immediately added as a new sample for that phrase, capped at MAX_SAMPLES_PER_PHRASE keeping the most recent, with enrollment samples never evicted. \"Skip\" stores only the negative signal. Unlabeled attempts are never used for training and are cleaned up periodically. POST /api/feedback/undo reverts the last feedback for an attempt within the undo window.",
+        "testStrategy": "Integration-test the full recognize -> feedback -> new sample path and assert the sample cap evicts the oldest non-enrollment sample first. Assert undo restores both phrases.json and feedback.jsonl state. Assert an attempt with no feedback is discarded by the cleanup job.",
+        "priority": "high",
+        "dependencies": [2, 5],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "HTTPS tunnel setup verified with iPhone Safari microphone access",
+        "description": "Put cloudflared or ngrok in front of the FastAPI server and verify that iPhone Safari grants microphone access on the tunneled URL.",
+        "details": "iPhone Safari only grants getUserMedia on HTTPS pages, so this blocks all real-device testing and must be verified early rather than discovered at demo time. Document the tunnel command in the run script and README, including how to obtain a stable URL. Confirm MediaRecorder actually produces audio on a physical iPhone through the tunnel, not just that the page loads.",
+        "testStrategy": "Manual verification on a physical iPhone: open the tunneled HTTPS URL in Safari, grant the microphone prompt, record a clip, and confirm the upload reaches the server with a non-empty body. Repeat on Android Chrome.",
+        "priority": "high",
+        "dependencies": [1],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Front-end shell and MediaRecorder recorder utility",
+        "description": "Build the single-page vanilla HTML/CSS/JS shell with Talk/Setup mode switching and a recorder utility handling permissions, MIME detection, press-and-hold, and length guards.",
+        "details": "Mobile-first single page, no framework. Large toggle/tab between Talk and Setup. Styling constraints from the PRD: very large touch targets, high contrast, large type, picture-first buttons, no reliance on color alone. Recorder utility wraps MediaRecorder: requests mic permission, detects a supported MIME type via MediaRecorder.isTypeSupported (webm/opus on Chrome, mp4/aac on iPhone Safari), handles press-and-hold via both touch and mouse events, and enforces MIN_CLIP_SEC / MAX_CLIP_SEC client-side to ignore accidental taps. Clear recording state with a color change and pulsing indicator while held.",
+        "testStrategy": "Manual test on iPhone Safari and Android Chrome: hold-to-talk produces a playable blob of the expected MIME type, a quick accidental tap is ignored, and a long hold is capped. Verify the mode toggle keeps state and that the mic permission denial path shows a usable message.",
+        "priority": "high",
+        "dependencies": [1, 7],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Setup mode: custom phrases and sample management UI",
+        "description": "Build custom phrase creation (text plus emoji or photo, personal-word toggle), the record-3-samples flow with playback and re-record, and phrase list management.",
+        "details": "Create a phrase with a text field and either an emoji picker or a photo upload, plus a \"This is my own word (not standard English)\" toggle that sets personal_word. Record three samples with playback and re-record before saving. Phrase list view shows every phrase with its visual and text and sample count, and supports delete phrase, delete individual sample, and add more samples. Enough on its own to enroll a user and run the first end-to-end demo; the guided built-in enrollment flow arrives with task 18. Optional: warn when a new phrase is acoustically close to an existing one.",
+        "testStrategy": "Manual flow on a phone: create a phrase with an emoji, record three samples, play each back, re-record one, save, and confirm it appears in the list with the right count. Confirm the personal-word toggle persists as personal_word in phrases.json and that deletion removes the audio files.",
+        "priority": "high",
+        "dependencies": [2, 8],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Talk mode with result card, Yes/No feedback, correction screen, and top-3 picker",
+        "description": "Build the hold-to-talk button, listening/thinking states, the large result card, the two large accuracy buttons, the correction screen, the undo toast, and the unsure top-3 picker.",
+        "details": "One very large hold-to-talk button filling much of the screen. On release, upload to POST /api/recognize and show a listening/thinking state. Confident saved-phrase match shows the result card. Otherwise render the top 3 candidates as big buttons, visually distinguishing saved phrases (emoji/image) from generated text (generic speech icon); tapping one counts as a Yes label. \"None of these\" opens the correction options. Yes/No buttons each at least half the screen width with distinct colors AND icons. Correction screen offers the other top-3 candidates, the full phrase grid, \"Type what I said\" for a supporter, and Skip. Undo toast for a few seconds after any tap to catch mis-taps. Friendly prompt to visit Setup when enrollment is not finished. This completes the first end-to-end demo: enroll, speak, card, feedback.",
+        "testStrategy": "Manual end-to-end on a phone against an enrolled phrase set: confident match shows the card; a deliberately ambiguous utterance shows three buttons; each correction path posts the expected label to /api/feedback; the undo toast reverts the stored event. Verify the no-tap case stores nothing.",
+        "priority": "high",
+        "dependencies": [6, 8],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "ElevenLabs TTS endpoint with disk cache and speechSynthesis fallback",
+        "description": "Implement GET /api/tts with an on-disk cache keyed by (text, voice) and client playback that falls back to the browser's speechSynthesis when ElevenLabs is unavailable.",
+        "details": "Server calls the ElevenLabs REST API via httpx and caches the result at data/tts_cache/<sha1(text+voice_id)>.mp3 so repeated phrases play instantly and do not consume quota. Return 503 when no API key is configured or on network/quota failure, and have the client fall back to browser speechSynthesis. Confident saved-phrase results are spoken automatically; generated text from the phonetic decoder is never spoken until the user confirms it. Completes the demoable MVP (tasks 1-11).",
+        "testStrategy": "Unit-test that a second request for the same (text, voice) serves from cache without an outbound call, and that a missing key returns 503. Manual test on a phone that the fallback voice speaks when the server returns 503.",
+        "priority": "high",
+        "dependencies": [10],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Photon iMessage TypeScript service",
+        "description": "Build the Node/TypeScript service that runs on a Mac signed into Messages, integrates Photon's local iMessage SDK, and exposes POST /send on localhost.",
+        "details": "Minimal localhost HTTP endpoint POST /send {to, text} -> {ok, error?}. Keep every Photon SDK call behind this one endpoint so nothing else in the system depends on the SDK's shape. The exact Photon package name and send API are open questions in the PRD and must be confirmed against Photon's docs first. README documents the Mac prerequisites: signed into Messages with the sending Apple ID, service running locally, and any required permissions. Handle and report errors clearly rather than failing silently.",
+        "testStrategy": "Send a message to the developer's own number and confirm delivery in Messages. Unit-test the endpoint's error path with an invalid handle and assert {ok: false} with a readable error. Confirm the service refuses to start with a clear message when Messages is not signed in.",
+        "priority": "medium",
+        "dependencies": [1],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "Contacts, send proxy, and send buttons on confirmed results",
+        "description": "Add contacts.json with GET /api/contacts, the POST /api/send proxy to the Photon service, send buttons on the confirmed result card, and Photon reachability in the health endpoint.",
+        "details": "contacts.json holds id, name, handle (phone or email), and optional emoji; a UI editor is a nice-to-have and hand-editing the file is acceptable for the MVP. POST /api/send {text, contact_id} forwards to PHOTON_SERVICE_URL over localhost HTTP with a timeout and clear error reporting. \"Send to <contact>\" buttons appear on the result card only after the result has been confirmed by a Yes tap or a picker tap, so wrong text can never be sent. Show sent/failed status in the UI. Extend GET /api/health with Photon service reachability.",
+        "testStrategy": "Integration-test that /api/send forwards the right payload and surfaces a timeout as a failed status rather than hanging. Manual test that send buttons are absent before confirmation and present after, and that a successful send shows sent state.",
+        "priority": "medium",
+        "dependencies": [11, 12],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "Phoneme inventory and canonical symbol mapping",
+        "description": "Choose the General American English phoneme inventory and build the tested mapping table between recognizer output symbols and lexicon pronunciation symbols.",
+        "details": "The recognizer's symbols and the lexicon's pronunciations MUST end up in one canonical inventory. If they differ (espeak-style IPA from the recognizer versus ARPAbet from CMUdict), a mapping table converts both into the canonical set. This is the first step of the phonetic foundation and a prerequisite for the recognizer, the lexicon, and the aligner. Document the inventory and every mapping decision, including the phonotactic exemptions used later by the coverage checker (for example /ng/ never word-initial, word-initial /zh/ exempt).",
+        "testStrategy": "Unit-test the mapping in both directions over the full inventory: every recognizer symbol maps to exactly one canonical symbol, every lexicon symbol maps to exactly one canonical symbol, and no canonical symbol is unreachable. Assert the table fails loudly on an unknown symbol rather than silently dropping it.",
+        "priority": "high",
+        "dependencies": [1],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "Phoneme recognizer module with caching and latency measurement",
+        "description": "Load the chosen pretrained CTC phoneme-recognition model, run it on cleaned audio, return the phoneme sequence plus per-frame posteriors, cache both, and measure CPU latency.",
+        "details": "Candidate checkpoint: facebook/wav2vec2-lv-60-espeak-cv-ft, which outputs espeak-style IPA phonemes. The exact checkpoint is an open question and must be confirmed on three axes before committing: output symbol set (must map through task 14), license, and CPU/MPS latency. Run once per clip and cache the decoded phoneme sequence to data/phonemes/<id>.json with per-frame posteriors as .npy. Pre-download weights so the demo has no network dependency. Measure latency early, since a slow model would push recognition past an acceptable interaction budget and the DTW path must stay fast as a fallback.",
+        "testStrategy": "Run the recognizer on fixture clips and assert the output symbols all map through the canonical table. Assert a second call hits the cache. Record and report wall-clock latency on the target laptop CPU for a short and a long clip, and fail the check if it exceeds the latency budget.",
+        "priority": "high",
+        "dependencies": [3, 14],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 16,
+        "title": "Pronunciation lexicon builder",
+        "description": "Build data/lexicon/words.tsv from a frequency-ranked common-English word list with canonical pronunciations, plus a G2P fallback for out-of-dictionary words.",
+        "details": "Source a permissively licensed frequency-ranked word list of LEXICON_SIZE words (the source and its license are open questions in the PRD). Get pronunciations from CMUdict and/or phonemizer with espeak-ng, normalized to the canonical inventory from task 14. Output word, frequency, and canonical pronunciation(s) per row. The lexicon must include every word in the enrollment set, the phrase packs, and all custom non-personal phrases; provide a G2P fallback for words a user types that the dictionary does not cover. Personal words are excluded from the lexicon as they do not follow standard pronunciation.",
+        "testStrategy": "Unit-test that every pronunciation uses only canonical symbols, that known words resolve to expected pronunciations, and that the G2P fallback produces a valid pronunciation for an invented word. Assert the builder is deterministic and that the enrollment-set vocabulary is fully covered.",
+        "priority": "high",
+        "dependencies": [14],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 17,
+        "title": "Enrollment coverage checker and the authored enrollment phrase set",
+        "description": "Write the coverage checker script and unit test, then author the ~25-30 phrase phonetically balanced enrollment set and iterate until it passes.",
+        "details": "Checker loads the enrollment set, transcribes it through the lexicon, and fails if any phoneme occurs fewer than MIN_PHONEME_OCCURRENCES times (default 2) or if any phonotactically allowed word-initial or word-final consonant position is missing, using the documented exemption list. It prints a coverage table. Then author the set itself: ~25-30 short, functional, easy-to-say phrases (target 6 words or fewer) with text, emoji, and phoneme transcription, shipped as data/enrollment_set.json. The phrases must be useful in their own right (cafe, needs, greetings) so each recording serves as both a whole-phrase template and phonetic training data. The exact list is deliberately not fixed in the PRD; it is defined here and must pass the checker. Add GET /api/enrollment-set returning the built-in phrases with per-phrase recording status.",
+        "testStrategy": "Run the checker as a unit test in CI so the enrollment set cannot regress. Assert the checker fails on a deliberately under-covering fixture set and passes on the authored set. Review phrase lengths against the 6-word target and confirm every phrase has an emoji.",
+        "priority": "high",
+        "dependencies": [16],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 18,
+        "title": "Guided enrollment UI",
+        "description": "Step the user through the built-in enrollment set one phrase at a time with record, playback, and re-record, a progress bar, and resume where they left off.",
+        "details": "Shows one phrase at a time as a big emoji plus text with a record button, playback, re-record, then next, three recordings per phrase. Progress bar reads like \"12 of 28\". Must resume mid-enrollment rather than restarting, since the target is roughly five minutes and interruptions are expected. Each sample uploads to the server and is converted, cleaned, feature-extracted, and phoneme-recognized with results cached. Supporters may be operating the UI while the speaker records, so keep targets large and the next/re-record choice unambiguous.",
+        "testStrategy": "Manual run of the full enrollment set on a phone, timed to check the five-minute target. Close the page midway and reopen to confirm it resumes at the right phrase. Verify all three samples per phrase land in phrases.json with origin \"enrollment\" and that features and phonemes are cached.",
+        "priority": "high",
+        "dependencies": [9, 17],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 19,
+        "title": "Phoneme aligner",
+        "description": "Implement weighted Levenshtein / Needleman-Wunsch alignment between a recognized phoneme sequence and the expected phonemes of labeled text, producing substitution, deletion, and insertion pairs.",
+        "details": "For each labeled recording (enrollment plus feedback), align the recognized phoneme sequence against the expected phoneme sequence from the lexicon. Produces (intended, recognized | DELETION) pairs plus insertions, which are the raw material for the confusion profile and for the per-phoneme retraining counters. Both sequences must already be in the canonical inventory.",
+        "testStrategy": "Unit-test against hand-built cases covering a clean match, a single substitution, final consonant deletion, cluster reduction, and an inserted phoneme, asserting the exact expected alignment pairs. Assert alignment is symmetric in cost and deterministic.",
+        "priority": "high",
+        "dependencies": [15, 16],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 20,
+        "title": "Per-user phonetic profile with smoothing and versioning",
+        "description": "Build the confusion count matrix with deletion and insertion handling, the generic prior, smoothing, and versioned save/load, then build the initial profile from enrollment samples.",
+        "details": "Count matrix C[intended][recognized] with a DELETION column and an INSERTION row. Probabilities P(recognized | intended) = (C + alpha * Prior) normalized, where Prior is an identity-heavy generic confusion matrix optionally adjusted by phonetic-feature similarity (place, manner, voicing) and alpha is PROFILE_SMOOTHING_ALPHA. Sounds with few examples must stay close to the prior so a handful of enrollment examples cannot overfit. Build the initial profile from all enrollment samples, excluding personal words, which would corrupt it. Version on disk as profile/profile_v<N>.json with profile/current.json and profile/counters.json so a bad retrain can roll back.",
+        "testStrategy": "Unit-test that a phoneme with zero observations equals the prior, that a phoneme with many consistent observations moves decisively away from it, and that every row sums to 1. Assert personal-word samples are excluded. Assert save/load round-trips and that version numbers increment without overwriting.",
+        "priority": "high",
+        "dependencies": [17, 19],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 21,
+        "title": "Phonetic decoder with beam-search sentence decoding",
+        "description": "Score lexicon words by profile-weighted alignment cost and run a beam search that segments the recognized phoneme sequence into words, returning the top-K transcripts.",
+        "details": "Cost of a candidate word = minimum-cost alignment between its expected phonemes and the recognized phonemes, with substitution/deletion/insertion costs of -log P from the profile. Sentence decoding: beam search segmenting the recognized sequence into up to MAX_DECODE_WORDS lexicon words, total score = profile cost + LM_WEIGHT * language prior (word-frequency unigram, bigram if a source is available) + a bonus for words and phrases in the user's phrase list and packs. Output the top-K transcripts with normalized scores. Scope limits matter: a bounded lexicon of LEXICON_SIZE words and short sentences only. Upgrade path: score against per-frame CTC posteriors rather than the 1-best phoneme string.",
+        "testStrategy": "Hold out words from profile building and measure word-level and top-3 accuracy on them to show generalization to words never recorded. Unit-test that the phrase-list bonus promotes an enrolled phrase over an equally scoring lexicon sentence, and cap beam width to keep decode latency inside the budget.",
+        "priority": "high",
+        "dependencies": [16, 20],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 22,
+        "title": "Hybrid ranker, generated-candidate UI, and phoneme coverage screen",
+        "description": "Merge DTW and decoder candidates into one ranked list with the confidence rule, show generated candidates distinctly in the UI, and add the coverage screen backed by GET /api/profile.",
+        "details": "Merge DTW phrase candidates and phonetic-decoder transcripts using calibrated scores; until calibration exists (task 24), apply the simple rule that a DTW phrase match beats generated text unless the DTW margin is below threshold. Confidence: only a saved phrase can ever be auto-confident. /api/recognize now returns mixed candidates. UI shows generated candidates with a generic icon so the user knows they are less certain, and generated results always pass through the picker and confirmation before being spoken or sent. GET /api/profile returns phoneme coverage, per-phoneme example counts, progress toward the next retrain, and the current profile version; Setup gets a simple screen showing which sounds have enough examples and which are weak.",
+        "testStrategy": "Integration-test that a generated top candidate always returns confident=false, and that a strong DTW match with a wide margin returns confident=true. Manual check that generated and saved-phrase candidates are visually distinguishable and that generated text is never spoken before a tap. Verify the coverage screen matches the counts in counters.json.",
+        "priority": "high",
+        "dependencies": [5, 10, 21],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 23,
+        "title": "Feedback-driven retraining with held-out validation and rollback",
+        "description": "Wire per-phoneme counters from labeled feedback, build the background retrainer with held-out validation and rollback, add the manual retrain endpoint, and run the threshold experiment.",
+        "details": "Labeled attempts are aligned to their expected phonemes; each aligned phoneme increments that phoneme's \"new examples since last retrain\" counter. When any counter reaches RETRAIN_MIN_NEW_EXAMPLES (default 10), rebuild that phoneme's row from all its aligned examples, evaluate the candidate profile against the current one on a held-out slice (HOLDOUT_FRACTION) using top-1 and top-3 accuracy, promote only if it is not worse, then reset the counter. Run in the background so it never blocks Talk mode. POST /api/profile/retrain forces a retrain for demos and testing, with status and progress on the coverage screen. The default of 10 is a guess: write the threshold experiment script that replays the feedback log chronologically at thresholds 3, 5, 10, and 20, report the accuracy gain per retrain, and replace the default in config with the measured value.",
+        "testStrategy": "Unit-test that a deliberately worse candidate profile is rejected and the current version is retained, and that counters reset only on promotion. Integration-test that a retrain triggered during an in-flight recognize does not block or corrupt it. Run the threshold experiment on real logged feedback and record the chosen value.",
+        "priority": "medium",
+        "dependencies": [6, 19, 22],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 24,
+        "title": "Evaluation scripts, parameter tuning, score calibration, and latency budget",
+        "description": "Build the leave-one-out DTW evaluation and the held-out-word phonetic evaluation, tune the thresholds and model parameters from their output, fit hybrid score calibration, and measure end-to-end latency.",
+        "details": "Leave-one-out over enrolled samples reporting DTW top-1 and top-3 accuracy and accuracy-versus-coverage across MARGIN values; use it to tune MARGIN, ABSOLUTE_MAX, TRIM_TOP_DB, and the MFCC parameters. Phonetic engine evaluation holds out phrases and words from profile building and measures word-level and top-3 accuracy on them to measure generalization honestly; use it to tune PROFILE_SMOOTHING_ALPHA, LM_WEIGHT, LEXICON_SIZE, and MAX_DECODE_WORDS. Fit the hybrid ranker's score calibration on labeled attempts, replacing the interim rule from task 22. Measure end-to-end recognize latency and keep it inside budget by capping samples per phrase, caching features, and limiting beam width.",
+        "testStrategy": "Both evaluation scripts run reproducibly and emit a table plus the chosen parameter values. Assert the tuned MARGIN improves accuracy-at-coverage over the default on held-out data. Record end-to-end latency percentiles for the DTW path and the full hybrid path and compare against the budget.",
+        "priority": "medium",
+        "dependencies": [5, 23],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 25,
+        "title": "Nice-to-have features in priority order",
+        "description": "Only if time allows, in the PRD's stated order: phrase packs, listener screen, HuBERT/wav2vec2 features, Whisper second opinion, the Whisper benchmark, a custom ElevenLabs voice, and acoustic-model fine-tuning.",
+        "details": "N1 phrase packs: JSON packs (cafe, bus, doctor's office, emergency) with text and emoji, importable from Setup and added to the decoder's language prior. N2 listener screen: a /listener page subscribing to GET /api/listener/stream over SSE, showing confirmed Talk results in large type on a second device. N6 HuBERT/wav2vec2 DTW feature extractor behind the FEATURE_EXTRACTOR config switch, compared against MFCC with the eval script. N5 Whisper second opinion: run Whisper on the recording and boost a candidate whose text loosely matches, via rapidfuzz, by a configurable amount. N3 benchmark: Whisper versus this engine on a public atypical-speech dataset, with the dataset and its license still to be chosen, producing numbers and a chart for a slide. N4 custom ElevenLabs voice: configurable voice ID and setup flow. N7 acoustic-model fine-tuning: adapter/LoRA fine-tuning of the phoneme recognizer on the user's labeled data, only if the hardware allows.",
+        "testStrategy": "Each item ships with its own check: coverage that pack words reach the lexicon prior; a second device receiving SSE updates within a second; the eval script comparing HuBERT against MFCC on the same held-out set; a unit test that the Whisper boost is bounded and configurable; the benchmark reproducible from a script; and for N7, held-out validation with rollback as in task 23.",
+        "priority": "low",
+        "dependencies": [24],
+        "status": "pending",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2026-11-14T00:00:00.000Z",
+      "updated": "2026-11-14T00:00:00.000Z",
+      "description": "Tasks for master context"
+    }
+  }
+}
