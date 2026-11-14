@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: str = ""
     ELEVENLABS_VOICE_ID: str = "21m00Tcm4TlvDq8ikWAM"
     PHOTON_SERVICE_URL: str = "http://localhost:3001"
+    PHOTON_TIMEOUT_SEC: float = 10.0
 
     FEATURE_EXTRACTOR: str = "mfcc"
     MARGIN: float = 0.15
