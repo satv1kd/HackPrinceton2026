@@ -23,7 +23,12 @@ node_modules/
 
 # OS specific
 .DS_Store
-.venv/
+
+# Python
 __pycache__/
+*.pyc
+.venv/
 .pytest_cache/
+
+# Runtime data (recordings, features, caches)
 data/
