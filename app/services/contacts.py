@@ -21,11 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from app import settings_bridge
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONTACTS_PATH = "data/contacts.json"
+CONTACTS_FILENAME = "contacts.json"
 
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -138,9 +138,9 @@ class ContactStore:
     """Reads and writes ``data/contacts.json``."""
 
     def __init__(self, path=None):
-        self.path = Path(path) if path else Path(
-            settings_bridge.get("CONTACTS_PATH", DEFAULT_CONTACTS_PATH)
-        )
+        # Callers normally pass the path (see app/routers/send.py). The default
+        # is here so the store is usable from a script or a REPL.
+        self.path = Path(path) if path else Path(get_settings().DATA_DIR) / CONTACTS_FILENAME
 
     def load(self) -> List[Contact]:
         """Load every contact.

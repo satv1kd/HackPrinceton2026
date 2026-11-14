@@ -1,16 +1,17 @@
-"""Temporary seam onto Task 1's configuration module.
+"""Configuration seam for the Phase 4 phonetics modules.
 
-Task 1 owns config loading (``.env`` -> a settings object). These modules were
-written before it landed, so they read configuration through this shim, which
-prefers, in order:
+The app's own settings object (``app.config.Settings``) is the real source of
+truth and everything in Phase 1-3 imports ``get_settings()`` directly. The
+phonetics package is the exception: its keys (``PHONEME_MODEL``,
+``PHONEME_MODEL_OFFLINE``, ``PHONEME_CACHE_DIR``) are not on ``Settings``
+yet, because Phase 4 is not in the 15-task plan. This shim reads, in order:
 
-1. an attribute on ``app.config.settings``, if that module exists,
+1. an attribute on ``app.config.get_settings()``,
 2. the process environment,
 3. the caller's default.
 
-**Delete this once Task 1 is merged** and import the real settings object
-directly. The only thing that must stay true is the key names, which come
-from the PRD's config list.
+**Delete this** once those keys move onto ``Settings``; the only thing that
+must stay true is the key names, which come from the PRD's config list.
 """
 
 from __future__ import annotations
