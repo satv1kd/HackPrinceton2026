@@ -102,7 +102,7 @@ beforeEach(() => {
 /** Fresh module instance, so the module-level contacts cache never leaks. */
 let moduleCounter = 0;
 async function loadModule() {
-  return import(`../../static/js/send.js?v=${moduleCounter++}`);
+  return import(`../static/js/send-buttons.js?v=${moduleCounter++}`);
 }
 
 const sendCalls = () => calls.filter((call) => call.url.includes("/api/send"));

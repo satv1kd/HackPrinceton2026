@@ -14,7 +14,7 @@ and demoed without a Mac.
 
 Wiring (Task 1)::
 
-    from app.api.send import router as send_router
+    from app.routers.send import router as send_router
     app.include_router(send_router)
 
 Failure policy: a *caller* mistake is an HTTP error (404 for an unknown
@@ -28,14 +28,15 @@ failed, and the distinction should be visible to them.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app import settings_bridge
-from app.stores.contacts import Contact, ContactsError, ContactStore
+from app.config import get_settings
+from app.services.contacts import Contact, ContactsError, ContactStore
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,16 @@ class PhotonHealth(BaseModel):
 # ---------------------------------------------------------------------------
 
 def photon_base_url() -> str:
-    return str(settings_bridge.get("PHOTON_SERVICE_URL", DEFAULT_PHOTON_URL)).rstrip("/")
+    return str(getattr(get_settings(), "PHOTON_SERVICE_URL", DEFAULT_PHOTON_URL)).rstrip("/")
 
 
 def photon_timeout() -> float:
-    return settings_bridge.get("PHOTON_TIMEOUT_SEC", DEFAULT_TIMEOUT_SEC, cast=float)
+    return float(getattr(get_settings(), "PHOTON_TIMEOUT_SEC", DEFAULT_TIMEOUT_SEC))
 
 
 def get_contact_store() -> ContactStore:
     """Override in tests; Task 1 may override to share one instance."""
-    return ContactStore()
+    return ContactStore(Path(get_settings().DATA_DIR) / "contacts.json")
 
 
 async def get_photon_client() -> httpx.AsyncClient:
@@ -110,7 +111,7 @@ def list_contacts(store: ContactStore = Depends(get_contact_store)) -> list[dict
     """Contacts for the send buttons.
 
     Returns the public projection: no raw phone numbers or Apple IDs. See
-    :meth:`app.stores.contacts.Contact.to_public_json`.
+    :meth:`app.services.contacts.Contact.to_public_json`.
     """
     try:
         contacts = store.load()

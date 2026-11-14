@@ -25,7 +25,8 @@ _MISSING = object()
 
 def _from_task1_config(name: str) -> Any:
     try:
-        from app.config import settings  # type: ignore[import-not-found]
+        from app.config import get_settings
+        settings = get_settings()
     except Exception:
         return _MISSING
     for attribute in (name, name.lower()):

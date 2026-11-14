@@ -13,8 +13,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.send import get_contact_store, get_photon_client, router
-from app.stores.contacts import ContactStore
+from app.routers.send import get_contact_store, get_photon_client, router
+from app.services.contacts import ContactStore
 
 MOM = {"id": "mom", "name": "Mom", "handle": "+15551234567", "emoji": "👩"}
 CAFE = {"id": "cafe", "name": "Café", "handle": "cafe@example.com"}

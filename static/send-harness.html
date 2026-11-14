@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Development harness for static/js/send.js (Task 13).
+  Development harness for static/js/send-buttons.js (Task 13).
 
   NOT part of the app. The real Talk-mode result card (Task 10) will import
   send.js directly; this page stubs /api/contacts and /api/send so the send
@@ -74,7 +74,7 @@
 <div id="log">ready</div>
 
 <script type="module">
-import { renderSendButtons, loadContacts } from "./js/send.js";
+import { renderSendButtons, loadContacts } from "./js/send-buttons.js";
 
 const log = (message) => {
   const el = document.getElementById("log");

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app.stores.contacts import Contact, ContactsError, ContactStore, normalize_handle
+from app.services.contacts import Contact, ContactsError, ContactStore, normalize_handle
 
 MOM = {"id": "mom", "name": "Mom", "handle": "+15551234567", "emoji": "👩"}
 CAFE = {"id": "cafe", "name": "Café", "handle": "cafe@example.com"}
