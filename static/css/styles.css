@@ -43,3 +43,97 @@ h1 { font-size: clamp(1.7rem, 5vw, 2.5rem); font-weight: 550; letter-spacing: -.
 @media (max-width: 450px) { .site-header { padding: 16px; } .tagline { max-width: 115px; text-align: right; line-height: 1.4; } .mode-switch { margin-bottom: 30px; } .feedback-buttons { flex-wrap: wrap; } .feedback-btn { flex-basis: 45%; } }
 @media (prefers-reduced-motion: no-preference) { .talk-button.recording { animation: breathe 1.5s ease-in-out infinite; } @keyframes breathe { 50% { box-shadow: 0 0 0 8px #edd6cb; } } }
 @media (forced-colors: active) { button, .result-card, .toast { border: 2px solid ButtonText; } .mode-switch [aria-selected="true"] { outline: 2px solid Highlight; } }
+
+/* ---------------------------------------------------------------------------
+   Tasks 9-13: Setup mode, correction flow, send buttons.
+   Targets stay large and states carry an icon as well as a colour, per the
+   PRD's constraint that users may have limited fine motor control and that
+   colour alone must never signal meaning.
+   --------------------------------------------------------------------------- */
+
+/* --- send buttons (task 13) --- */
+.send-buttons { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem; }
+.send-button { min-height: 60px; font-size: 1.1rem; font-weight: 600; padding: .75rem 1rem;
+  border: 3px solid var(--ink); border-radius: 1rem; background: var(--paper); color: var(--ink); }
+.send-button[data-state="sending"] { opacity: .65; }
+.send-button[data-state="sent"] { border-color: #2f6b3a; color: #2f6b3a; background: var(--accent); }
+.send-button[data-state="failed"] { border-color: var(--danger); color: var(--danger); }
+.send-notice { color: var(--muted); font-size: 1rem; }
+
+/* --- phrase cards (task 9) --- */
+.phrase-card { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: 1rem; background: #fff; border: 1px solid var(--line); border-radius: 1rem; margin-bottom: .5rem; }
+.phrase-icon { font-size: 2.25rem; width: 60px; height: 60px; flex: 0 0 60px;
+  display: flex; align-items: center; justify-content: center; }
+.phrase-icon img { width: 60px; height: 60px; object-fit: cover; border-radius: .5rem; }
+.phrase-body { flex: 1 1 10rem; min-width: 0; }
+.phrase-body .phrase-text { margin: 0; font-size: 1.2rem; font-weight: 600; overflow-wrap: anywhere; }
+.sample-count { margin: .25rem 0 0; font-size: .95rem; color: var(--muted); }
+.sample-count.done { color: #2f6b3a; }
+.badge { display: inline-block; margin-top: .35rem; padding: .15rem .5rem;
+  background: var(--accent); border-radius: .4rem; font-size: .8rem; }
+.phrase-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+.icon-btn { min-width: 52px; min-height: 52px; font-size: 1.35rem;
+  border: 2px solid var(--line); border-radius: .75rem; background: var(--paper); }
+.icon-btn.danger { border-color: var(--danger); }
+.sample-list { flex: 1 1 100%; list-style: none; margin: .75rem 0 0; padding: 0; }
+.sample-list li { display: flex; align-items: center; gap: .5rem; padding: .25rem 0; }
+
+/* --- add-phrase form (task 9) --- */
+.phrase-form { margin-top: 1.5rem; padding: 1rem; background: #fff;
+  border: 1px solid var(--line); border-radius: 1rem; }
+.phrase-form h2 { margin-top: 0; font-size: 1.25rem; }
+.phrase-form label, .field-label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
+.phrase-form input[type="text"] { width: 100%; min-height: 52px; font-size: 1.1rem;
+  padding: .5rem .75rem; border: 2px solid var(--line); border-radius: .75rem; }
+.emoji-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.emoji-option { min-width: 56px; min-height: 56px; font-size: 1.6rem;
+  border: 2px solid var(--line); border-radius: .75rem; background: var(--paper); }
+.emoji-option.selected { border-color: var(--ink); background: var(--accent); }
+.checkbox-row { display: flex; align-items: center; gap: .6rem; font-weight: 400 !important; }
+.checkbox-row input { width: 28px; height: 28px; }
+.primary-btn { min-height: 60px; width: 100%; margin-top: 1rem; font-size: 1.1rem; font-weight: 600;
+  border: 3px solid var(--ink); border-radius: 1rem; background: var(--accent); color: var(--ink); }
+.form-error:empty { display: none; }
+.form-error { margin: .5rem 0 0; color: var(--danger); font-weight: 600; }
+
+/* --- overlays: correction flow (task 11) and sample recorder (task 9) --- */
+.correction-overlay, .sample-flow-overlay { position: fixed; inset: 0; z-index: 100;
+  padding: 1rem; overflow-y: auto; background: var(--paper); }
+.correction-header { margin-top: 0; font-size: 1.4rem; }
+.correction-section { margin-bottom: 1.5rem; }
+.correction-section h3 { font-size: 1.05rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .06em; }
+.correction-btn { display: flex; align-items: center; gap: .75rem; width: 100%;
+  min-height: 64px; margin-bottom: .5rem; padding: .75rem 1rem; font-size: 1.15rem; text-align: left;
+  background: #fff; border: 2px solid var(--line); border-radius: 1rem; }
+.phrase-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: .5rem; }
+.phrase-grid-btn { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .25rem; min-height: 104px; padding: .5rem; background: #fff;
+  border: 2px solid var(--line); border-radius: .75rem; }
+.phrase-grid-btn .icon { font-size: 1.9rem; }
+.phrase-grid-btn .icon img { width: 44px; height: 44px; object-fit: cover; border-radius: .35rem; }
+.phrase-grid-btn .text { font-size: .9rem; text-align: center; overflow-wrap: anywhere; }
+.grid-note { color: var(--muted); }
+.correction-type { margin-bottom: 1.5rem; }
+.correction-type input { width: 100%; min-height: 52px; font-size: 1.1rem; padding: .5rem .75rem;
+  border: 2px solid var(--line); border-radius: .75rem; }
+.correction-type-btn, .correction-skip-btn, .correction-cancel-btn {
+  min-height: 60px; width: 100%; margin-top: .5rem; font-size: 1.05rem;
+  border: 2px solid var(--line); border-radius: 1rem; background: #fff; }
+.correction-type-btn { border-color: var(--ink); background: var(--accent); font-weight: 600; }
+
+/* --- sample recorder flow (task 9) --- */
+.sample-flow-overlay { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+.phrase-display { text-align: center; }
+.big-emoji { font-size: 4.5rem; line-height: 1; }
+.phrase-display .phrase-text { margin: .5rem 0 0; font-size: 1.6rem; font-weight: 600; }
+.progress { margin: 0; font-size: 1.1rem; color: var(--muted); }
+.sample-controls { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; width: 100%; }
+.sample-controls button { min-height: 56px; flex: 1 1 8rem; }
+
+/* --- generated-candidate marker (task 11) --- */
+.generated-badge { display: inline-block; margin-left: .5rem; padding: .1rem .45rem;
+  border: 1px dashed var(--muted); border-radius: .4rem; font-size: .8rem; color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
