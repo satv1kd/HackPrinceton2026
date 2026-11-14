@@ -391,8 +391,11 @@ export class SampleRecorderFlow {
     this.controls.append(this.playBtn, this.retryBtn, this.keepBtn);
 
     this.message = document.createElement('p');
-    this.message.className = 'form-error';
-    this.message.setAttribute('role', 'alert');
+    this.message.className = 'form-note';
+    // role=status, not alert: most of what goes here is an instruction
+    // ("Tap to record"), and alert interrupts a screen reader every time.
+    // Failures are marked by tone instead, and read on the next pause.
+    this.message.setAttribute('role', 'status');
 
     const done = button('Done for now', () => this.finish());
     done.className = 'text-button';
@@ -404,11 +407,22 @@ export class SampleRecorderFlow {
     this.recordBtn.focus();
   }
 
-  update(message) {
+  /**
+   * Update the progress line, and optionally the message under it.
+   *
+   * `tone` exists because this one element carries both instructions and
+   * failures. It used to be styled as an error unconditionally, so "Tap to
+   * record, then tap again to stop" was shown in red to someone who had
+   * done nothing wrong.
+   */
+  update(message, tone = 'info') {
     const index = Math.min(this.recorded + 1, this.target);
     this.progress.textContent = `Recording ${index} of ${this.target}`;
     this.recordBtn.textContent = this.busy ? 'Stop' : 'Record';
-    if (message !== undefined) this.message.textContent = message;
+    if (message !== undefined) {
+      this.message.textContent = message;
+      this.message.className = tone === 'error' ? 'form-error' : 'form-note';
+    }
   }
 
   async toggle() {
@@ -436,7 +450,8 @@ export class SampleRecorderFlow {
       this.update(
         error.name === 'NotAllowedError'
           ? 'Microphone access was denied. Allow it in your browser settings.'
-          : error.message
+          : error.message,
+        'error'
       );
     }
   }
@@ -445,7 +460,7 @@ export class SampleRecorderFlow {
     if (!this.pending) return;
     this.playbackUrl && URL.revokeObjectURL(this.playbackUrl);
     this.playbackUrl = URL.createObjectURL(this.pending.blob);
-    new Audio(this.playbackUrl).play().catch(() => this.update('Could not play that back.'));
+    new Audio(this.playbackUrl).play().catch(() => this.update('Could not play that back.', 'error'));
   }
 
   reset() {
@@ -474,7 +489,7 @@ export class SampleRecorderFlow {
       this.update('Saved. Say it once more.');
       this.recordBtn.focus();
     } catch (error) {
-      this.update(error.message);
+      this.update(error.message, 'error');
     } finally {
       this.keepBtn.disabled = false;
     }

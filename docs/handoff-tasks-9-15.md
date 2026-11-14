@@ -118,11 +118,15 @@ make test-all
 
 ## Known gaps
 
-- **The new UI has not been opened in a browser.** Tasks 9, 11 and 13 are
-  covered by `tests/client-ui.test.mjs` and `tests/send.test.mjs` against a
-  DOM stub, not by a real render. The preview tooling in the environment this
-  was built in resolved its launch config from the wrong directory. **Open
-  Setup Mode and run one recording end to end before demoing.**
+- **Nothing has been through a microphone.** The UI has now been driven in a
+  real browser — Setup Mode renders and saves a phrase, the sample recorder
+  opens, the top-3 picker marks generated text "Suggested", the correction
+  flow opens with saved phrases and the inline text form, the send buttons
+  render per contact, and `/api/health` reports correctly — but every path
+  that needs audio stops at ffmpeg, which is not installed here. **Record one
+  phrase and recognise it before demoing**; that is the only untested link.
+- **`/api/send` has never reached Photon**, since there is no account. The
+  relay was exercised end to end in stub mode.
 - **Photon has never been called live.** The request shapes are now checked
   at compile time against `@photon-ai/api@0.6.0`'s published declarations
   (`photon-service/src/photon-contract.ts`, run by `npm run typecheck`), so
@@ -143,7 +147,7 @@ make test-all
 
 ```bash
 python -m pytest tests/ -q      # 200 pass, 17 fail without ffmpeg
-node --test tests/client-ui.test.mjs       # 31
+node --test tests/client-ui.test.mjs       # 32
 node --test tests/photon-service.test.mjs  # 29
 node --test tests/send.test.mjs            # 20
 node --test tests/recorder.test.mjs        # 9

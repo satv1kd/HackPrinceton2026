@@ -94,8 +94,10 @@ h1 { font-size: clamp(1.7rem, 5vw, 2.5rem); font-weight: 550; letter-spacing: -.
 .checkbox-row input { width: 28px; height: 28px; }
 .primary-btn { min-height: 60px; width: 100%; margin-top: 1rem; font-size: 1.1rem; font-weight: 600;
   border: 3px solid var(--ink); border-radius: 1rem; background: var(--accent); color: var(--ink); }
-.form-error:empty { display: none; }
+.form-error:empty, .form-note:empty { display: none; }
 .form-error { margin: .5rem 0 0; color: var(--danger); font-weight: 600; }
+/* Same slot as .form-error, for instructions rather than failures. */
+.form-note { margin: .5rem 0 0; color: var(--muted); }
 
 /* --- overlays: correction flow (task 11) and sample recorder (task 9) --- */
 .correction-overlay, .sample-flow-overlay { position: fixed; inset: 0; z-index: 100;

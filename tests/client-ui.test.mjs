@@ -459,6 +459,29 @@ test('playback uses the pending blob', async () => {
   flow.close();
 });
 
+test('instructions are not styled as errors, but failures are', async () => {
+  // Caught in a browser, not here: the message slot was always given the
+  // error class, so "Tap to record, then tap again to stop" — an
+  // instruction to someone who has done nothing wrong — was shown in red.
+  stubFetch({ '/samples': () => jsonReply(500, { detail: 'nope' }) });
+  const flow = new SampleRecorderFlow(
+    { id: 'p1', text: 'I want water', sample_count: 0 },
+    { recorder: fakeRecorder([RECORDING]), onDone: () => {} },
+  );
+  flow.open();
+
+  assert.match(flow.message.textContent, /Tap to record/);
+  assert.equal(flow.message.className, 'form-note');
+  assert.equal(flow.message.getAttribute('role'), 'status');
+
+  await flow.recordBtn.click();
+  assert.equal(flow.message.className, 'form-note', 'playback prompt is not a failure');
+
+  await flow.keepBtn.click();
+  assert.equal(flow.message.className, 'form-error', 'a failed upload is');
+  flow.close();
+});
+
 test('closing the flow removes the overlay', async () => {
   const flow = new SampleRecorderFlow(
     { id: 'p1', text: 'x', sample_count: 0 },
