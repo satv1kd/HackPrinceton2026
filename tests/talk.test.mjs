@@ -35,7 +35,9 @@ test('mode switching updates tab semantics and uses real phrase response', async
   await tick();
   assert.equal(document.getElementById('setup-tab').getAttribute('aria-selected'), 'true');
   assert.equal(document.getElementById('talk-mode').hidden, true);
-  assert.match(document.getElementById('phrase-list').textContent, /Water.*1 recordings/);
+  // Setup Mode (task 9) shows progress towards the three samples enrollment
+  // asks for, not a bare count, so the card reads "1 of 3 recordings".
+  assert.match(document.getElementById('phrase-list').textContent, /Water.*1 of 3 recordings/);
   app.switchMode('talk');
   assert.equal(document.getElementById('talk-mode').hidden, false);
 });

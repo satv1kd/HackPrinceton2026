@@ -37,7 +37,9 @@ export function chooseTransport(env: NodeJS.ProcessEnv = process.env): MessageTr
         "PHOTON_MODE=live needs both PHOTON_API_KEY and PHOTON_PROJECT_ID",
       );
     }
-    return createPhotonTransport({ apiKey, projectId });
+    // Optional: pins the sending line when a project has more than one.
+    const senderId = env.PHOTON_SENDER_ID?.trim() || undefined;
+    return createPhotonTransport({ apiKey, projectId, senderId });
   }
   console.log(
     "[photon] no PHOTON_API_KEY/PHOTON_PROJECT_ID; starting in stub mode " +

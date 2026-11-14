@@ -40,6 +40,14 @@ has the full correction and a setup checklist. The damage is contained to
 `photon-service/src/transport.ts`; the `POST /send {to, text} -> {ok, error?}`
 seam the rest of the app talks to is unchanged.
 
+**Sending needs our own line as the sender.** `sendMessage` wants a
+`spaceId` and a `senderId`, and `senderId` is *our* Photon line, not the
+recipient — so a send resolves the contact (`createOrGetUser`), then the
+conversation (`createOrGetSpace`), then sends. The line is discovered once
+from `listUsers` by its `details.type`; `PHOTON_SENDER_ID` pins it when a
+project has several, which is refused rather than guessed, because a shared
+line only accepts replies on the number the contact actually texted.
+
 **Photon runs in stub mode by default.** With no credentials,
 `photon-service` logs the send and returns ok, so the whole
 confirm → send → sent path demos with no Photon account at all. `PHOTON_MODE=live`
@@ -115,16 +123,17 @@ make test-all
   DOM stub, not by a real render. The preview tooling in the environment this
   was built in resolved its launch config from the wrong directory. **Open
   Setup Mode and run one recording end to end before demoing.**
-- **Photon's request shapes are unverified.** They come from the Photon docs,
-  not from a live call — no account was available. The `listMessages` →
-  `sendMessage` sequence in `transport.ts` is the thing most likely to need a
-  small correction once a key exists.
+- **Photon has never been called live.** The request shapes are now checked
+  at compile time against `@photon-ai/api@0.6.0`'s published declarations
+  (`photon-service/src/photon-contract.ts`, run by `npm run typecheck`), so
+  the field names are the SDK's rather than a guess. What is still open is
+  behaviour: whether `content.format: "plain"` is accepted (the SDK types it
+  as a free string), and whether the live service matches its own types.
 - **17 Python tests fail on a machine without ffmpeg** (`test_audio.py`,
   `test_talk_integration.py`). That is the whole of the failure set: 200 pass.
   Install ffmpeg and they go green.
-- **`tests/talk.test.mjs` needs `npm install`** — it imports jsdom, which is
-  declared in `package.json` but not installed. Every other JS suite is
-  dependency-free on purpose and runs on a clean checkout.
+- **`tests/talk.test.mjs` needs `npm install`** — it imports jsdom. Every
+  other JS suite is dependency-free on purpose and runs on a clean checkout.
 - **Phase 4 phonetics is out of scope of the 15-task list** but is in the
   tree (`app/phonetics/`), with `app/settings_bridge.py` as its config seam.
   Real-model latency is still unmeasured (the weights are ~1 GB):
@@ -135,7 +144,9 @@ make test-all
 ```bash
 python -m pytest tests/ -q      # 200 pass, 17 fail without ffmpeg
 node --test tests/client-ui.test.mjs       # 31
-node --test tests/photon-service.test.mjs  # 24
+node --test tests/photon-service.test.mjs  # 29
 node --test tests/send.test.mjs            # 20
 node --test tests/recorder.test.mjs        # 9
+node --test tests/talk.test.mjs            # 6  (needs npm install for jsdom)
+cd photon-service && npm run typecheck     # Photon shapes vs the real SDK
 ```

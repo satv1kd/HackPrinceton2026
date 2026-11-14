@@ -4,22 +4,27 @@
  * IMPORTANT — the PRD is wrong about Photon, and this file is where that
  * shows. The PRD says "a small TypeScript service runs on a Mac signed into
  * Messages and uses Photon's local iMessage SDK". Photon 2.0 is not that: it
- * is a **hosted** platform (https://api.photon.codes/v1) that owns the
- * phone lines. Nothing runs against the Messages app, and no Mac is needed.
+ * is a **hosted** platform that owns the phone lines. Nothing runs against
+ * the Messages app, and no Mac is needed.
  *
- * Two consequences that change the product, not just this file:
+ * The consequence that changes the product, not just this file: a shared
+ * Photon line **cannot send an unsolicited first message**. The recipient has
+ * to message the assigned number first (send exactly `ping` as an iMessage).
+ * Until they do, the API refuses the send with `SHARED_LINE_INBOUND_REQUIRED`.
+ * "Send to Mom" therefore only works for contacts who have texted the line.
  *
- *  1. A shared Photon line **cannot send an unsolicited first message**. The
- *     recipient must first message the assigned number (the docs say to send
- *     exactly `ping` as an iMessage). Until they do, there is no conversation
- *     to reply into and sends fail. "Send to Mom" therefore only works for
- *     contacts who have messaged the line first.
- *  2. Sending is reply-shaped: it needs `spaceId`, `senderId` and
- *     `parentMessageId` taken from an incoming message, so this service has
- *     to find the conversation for a handle before it can send to it.
- *
- * Both are surfaced to the user as ordinary send failures with a readable
+ * That is surfaced to the user as an ordinary send failure with a readable
  * reason, which is what `static/js/send-buttons.js` renders.
+ *
+ * ## How the shapes here were established
+ *
+ * The call shapes below are checked against the TypeScript declarations
+ * published in `@photon-ai/api@0.6.0` — the namespace (`projects`), the
+ * `{ path, body, headers }` input envelope, the required `idempotency-key`
+ * header, the `{ items: [...] }` list envelope, and the `SHARED_LINE_*`
+ * problem codes all come from that package's `.d.ts` files rather than from
+ * prose. **No call has been made against the live API**, because no account
+ * was available; see photon-service/README.md for what that leaves open.
  *
  * Transports are deliberately injectable so the relay can be exercised with
  * no credentials and no network (see tests/photon-service.test.mjs).
@@ -37,6 +42,9 @@ export interface MessageTransport {
   send(to: string, text: string): Promise<SendResult>;
   health(): Promise<{ ok: boolean; detail: string }>;
 }
+
+/** Every call in this service is iMessage; Photon also speaks sms/email. */
+const PLATFORM = "imessage";
 
 /* ------------------------------------------------------------------ stub */
 
@@ -67,46 +75,88 @@ export function createStubTransport(
 export interface PhotonConfig {
   apiKey: string;
   projectId: string;
+  /**
+   * Our own line's Photon user id. Optional: when unset it is discovered by
+   * listing the project's users and taking the one that is a line. Set
+   * `PHOTON_SENDER_ID` to pin it if the project has more than one.
+   */
+  senderId?: string;
   /** Injectable for tests; defaults to the real SDK via dynamic import. */
   clientFactory?: () => Promise<PhotonLikeClient>;
 }
 
 /**
+ * A Photon user: either a contact, or one of our own lines.
+ *
+ * `id` is optional because the SDK's `User` is a union that includes an
+ * `{ platform: 'UNKNOWN', raw }` variant carrying no id — a user on a
+ * platform this client version does not model. Every read of `id` here is
+ * guarded accordingly.
+ */
+export interface PhotonUser {
+  id?: string;
+  handle?: string;
+  platform?: string;
+  /** `type` is 'shared' | 'dedicated' on a line, and absent on a contact. */
+  details?: { type?: string; resourceId?: string };
+  /**
+   * The SDK's resource types are open (`[x: string]: unknown`) and carry many
+   * fields this service ignores. Without this, TypeScript's weak-type check
+   * rejects a real resource as having nothing in common with our narrow view.
+   */
+  [key: string]: unknown;
+}
+
+/** A conversation. Narrow view of the SDK's `Space` union; see PhotonUser. */
+export interface PhotonSpace {
+  id?: string;
+  [key: string]: unknown;
+}
+
+/** A sent message. Narrow view of the SDK's `Message` union. */
+export interface PhotonSentMessage {
+  id?: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+/**
  * The slice of the Photon 2.0 SDK this service uses.
  *
- * Only these two calls are documented in the beta iMessage guide, and the
- * return shape of `sendMessage` is not specified there, so this interface
- * stays as small as possible. Everything uncertain about Photon is contained
- * in this file; the relay's own HTTP contract never changes.
+ * Shapes follow `@photon-ai/api@0.6.0`'s declarations: every operation takes
+ * one `{ path, body?, query?, headers? }` argument, and list operations
+ * answer `{ items, nextPageToken? }`.
  */
 export interface PhotonLikeClient {
   projects: {
-    listMessages(args: {
+    // Note the path key: `getProject` wants `projectId`, while the
+    // message/user/space operations below want `id`. That asymmetry is the
+    // SDK's, not a typo, and photon-contract.ts is what caught it.
+    get(input: { path: { projectId: string } }): Promise<unknown>;
+    createOrGetUser(input: {
+      path: { id: string };
+      body: { handle: string; platform: string };
+    }): Promise<PhotonUser>;
+    listUsers(input: {
       path: { id: string };
       query?: Record<string, unknown>;
-    }): Promise<{ data?: PhotonMessage[]; messages?: PhotonMessage[] }>;
-    sendMessage(args: {
+    }): Promise<{ items?: PhotonUser[] }>;
+    createOrGetSpace(input: {
       path: { id: string };
-      headers?: Record<string, string>;
+      headers: { "idempotency-key": string };
+      body: { participantIds: string[]; platform: string };
+    }): Promise<PhotonSpace>;
+    sendMessage(input: {
+      path: { id: string };
+      headers: { "idempotency-key": string };
       body: {
         spaceId: string;
         senderId: string;
         parentMessageId?: string;
-        content: { type: "text"; format: "plain"; text: string };
+        content: { type: "text"; format: string; text: string };
       };
-    }): Promise<{ id?: string } | undefined>;
+    }): Promise<PhotonSentMessage | undefined>;
   };
-}
-
-export interface PhotonMessage {
-  id?: string;
-  spaceId?: string;
-  senderId?: string;
-  /** The participant handle, e.g. "+14155550123". Field name varies. */
-  from?: string;
-  author?: { id?: string; handle?: string };
-  handle?: string;
-  createdAt?: string;
 }
 
 /** Strip formatting from a handle: digits only for phones, lowercase email. */
@@ -133,17 +183,86 @@ export function handleKey(handle: string): string {
   return normalized.length > 10 ? normalized.slice(-10) : normalized;
 }
 
-/** Pull every handle-ish field off a message, as comparison keys. */
-function handlesOf(message: PhotonMessage): string[] {
-  return [message.from, message.handle, message.author?.handle]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .map(handleKey);
+/**
+ * The handle as Photon wants it: E.164 for phone numbers.
+ *
+ * `normalizeHandle` is for *comparison* and throws the `+` away, which is the
+ * wrong thing to send. A ten-digit number is assumed NANP and gets `+1`,
+ * matching the only country Photon's beta assigns lines in; anything already
+ * carrying a country code just gets the `+` back. An email (an Apple ID is a
+ * valid iMessage handle) is passed through lowercased.
+ */
+export function toPhotonHandle(handle: string): string {
+  const normalized = normalizeHandle(handle);
+  if (normalized.includes("@")) return normalized;
+  if (normalized.length === 10) return `+1${normalized}`;
+  return `+${normalized}`;
+}
+
+/** True for a user that is one of our lines rather than a contact. */
+function isLine(user: PhotonUser): boolean {
+  const type = user?.details?.type;
+  return type === "shared" || type === "dedicated";
+}
+
+/**
+ * Turn a Photon problem response into something a non-technical user can act
+ * on, keeping the raw detail for anything unrecognised.
+ *
+ * The codes come from `@photon-ai/api`'s generated problem types. The first
+ * two are the ones that will actually happen during a demo.
+ */
+function explainError(error: unknown, to: string): string {
+  const code = problemCode(error);
+  switch (code) {
+    case "SHARED_LINE_INBOUND_REQUIRED":
+      return (
+        `${to} has not texted your Photon number yet. A shared Photon line ` +
+        `cannot send first: ask them to text "ping" to it, then try again.`
+      );
+    case "SHARED_LINE_NOT_ASSIGNED":
+      return (
+        "no shared iMessage line is assigned to this Photon project. Assign " +
+        "one in the Photon dashboard (Platforms -> iMessage)."
+      );
+    case "SHARED_LINE_GROUP_UNSUPPORTED":
+      return "a shared Photon line cannot message a group, only one person.";
+    case "SENDER_NOT_AUTHORIZED":
+    case "SENDER_NOT_FOUND":
+      return (
+        "Photon rejected the sending line. Check PHOTON_SENDER_ID, or clear " +
+        "it to let the service discover the line itself."
+      );
+    case "NOT_AUTHENTICATED":
+      return "Photon rejected the API key. Check PHOTON_API_KEY.";
+    case "INSUFFICIENT_SCOPE":
+      return (
+        "the API key lacks a scope it needs. It wants project:read and " +
+        "project:write."
+      );
+    case "BILLING_SUSPENDED":
+      return "the Photon account is out of credits.";
+    case "USER_IDENTITY_CONFLICT":
+      return `Photon could not resolve ${to} to a single iMessage identity.`;
+    default:
+      return describe(error);
+  }
+}
+
+/** Read a problem `code` off an ApiError-shaped error, if there is one. */
+function problemCode(error: unknown): string | null {
+  const body = (error as { body?: unknown })?.body;
+  const fromBody = (body as { code?: unknown })?.code;
+  if (typeof fromBody === "string") return fromBody;
+  const direct = (error as { code?: unknown })?.code;
+  return typeof direct === "string" ? direct : null;
 }
 
 export function createPhotonTransport(config: PhotonConfig): MessageTransport {
   const { apiKey, projectId } = config;
   const clientFactory = config.clientFactory ?? defaultClientFactory(apiKey);
   let client: PhotonLikeClient | null = null;
+  let cachedSenderId: string | null = config.senderId ?? null;
 
   async function getClient(): Promise<PhotonLikeClient> {
     if (client === null) client = await clientFactory();
@@ -151,51 +270,77 @@ export function createPhotonTransport(config: PhotonConfig): MessageTransport {
   }
 
   /**
-   * Find the conversation to reply into for `to`.
+   * Find our own line's user id.
    *
-   * A shared line cannot start a conversation, so the only way to send is to
-   * reply inside one the contact opened. If none is found that is a real,
-   * explainable failure, not a bug.
+   * Sending needs the *line* as `senderId`, not the recipient. The project's
+   * users are its contacts plus its lines, and only a line carries
+   * `details.type`. Cached: it does not change while the service runs.
    */
-  async function findConversation(to: string): Promise<PhotonMessage | null> {
+  async function resolveSenderId(): Promise<string> {
+    if (cachedSenderId) return cachedSenderId;
     const photon = await getClient();
-    const response = await photon.projects.listMessages({ path: { id: projectId } });
-    const messages = response?.data ?? response?.messages ?? [];
-    const wanted = handleKey(to);
-    const matches = messages.filter((message) => handlesOf(message).includes(wanted));
-    if (matches.length === 0) return null;
-    // Newest wins: reply into the live conversation, not a stale one.
-    matches.sort(
-      (a, b) => Date.parse(b.createdAt ?? "") - Date.parse(a.createdAt ?? "") || 0,
-    );
-    return matches[0];
+    const response = await photon.projects.listUsers({
+      path: { id: projectId },
+      query: { platform: PLATFORM },
+    });
+    // A line with no id is unusable as a sender, so it is not a candidate.
+    const lines = (response?.items ?? []).filter((user) => isLine(user) && user.id);
+    if (lines.length === 0) {
+      throw new Error(
+        "no iMessage line found on this Photon project. Assign a shared line " +
+          "in the Photon dashboard, or set PHOTON_SENDER_ID.",
+      );
+    }
+    if (lines.length > 1 && !config.senderId) {
+      // Picking one at random would send from a number the contact has never
+      // seen, and a shared line only accepts replies on the line they texted.
+      throw new Error(
+        `this project has ${lines.length} iMessage lines ` +
+          `(${lines.map((line) => line.handle ?? line.id).join(", ")}). ` +
+          "Set PHOTON_SENDER_ID to the one your contacts text.",
+      );
+    }
+    // Non-null: the filter above kept only lines that have an id.
+    cachedSenderId = lines[0].id as string;
+    return cachedSenderId;
+  }
+
+  /**
+   * Resolve `to` to the space to send into.
+   *
+   * `createOrGetUser` + `createOrGetSpace` are both idempotent, so this is
+   * safe to repeat and does not depend on scanning message history. On a
+   * shared line the space only becomes sendable once the contact has texted
+   * in, which Photon reports as SHARED_LINE_INBOUND_REQUIRED.
+   */
+  async function resolveSpace(to: string, senderId: string): Promise<string> {
+    const photon = await getClient();
+    const recipient = await photon.projects.createOrGetUser({
+      path: { id: projectId },
+      body: { handle: toPhotonHandle(to), platform: PLATFORM },
+    });
+    if (!recipient?.id) throw new Error(`Photon returned no user id for ${to}`);
+
+    const space = await photon.projects.createOrGetSpace({
+      path: { id: projectId },
+      headers: { "idempotency-key": idempotencyKey("space", `${senderId}:${recipient.id}`) },
+      body: { participantIds: [senderId, recipient.id], platform: PLATFORM },
+    });
+    if (!space?.id) throw new Error(`Photon returned no conversation id for ${to}`);
+    return space.id;
   }
 
   return {
     mode: "live",
 
     async send(to, text) {
-      let conversation: PhotonMessage | null;
+      let senderId: string;
+      let spaceId: string;
       try {
-        conversation = await findConversation(to);
+        senderId = await resolveSenderId();
+        spaceId = await resolveSpace(to, senderId);
       } catch (error) {
-        return { ok: false, error: `could not read Photon conversations: ${describe(error)}` };
-      }
-
-      if (conversation === null) {
-        return {
-          ok: false,
-          error:
-            `no iMessage conversation with ${to} yet. A shared Photon line cannot ` +
-            `send first: ask them to text "ping" to your assigned Photon number, ` +
-            `then try again.`,
-        };
-      }
-      if (!conversation.spaceId || !conversation.senderId) {
-        return {
-          ok: false,
-          error: "the Photon conversation is missing spaceId or senderId",
-        };
+        return { ok: false, error: explainError(error, to) };
       }
 
       try {
@@ -205,17 +350,19 @@ export function createPhotonTransport(config: PhotonConfig): MessageTransport {
           // Retries must not duplicate a message the user already sent.
           headers: { "idempotency-key": idempotencyKey(to, text) },
           body: {
-            spaceId: conversation.spaceId,
-            senderId: conversation.senderId,
-            parentMessageId: conversation.id,
+            spaceId,
+            senderId,
+            // `format` is a free string in the SDK's types; "plain" is the
+            // one guess left in this file. If Photon rejects it, this is the
+            // line to change.
             content: { type: "text", format: "plain", text },
           },
         });
-        // The docs say delivery is accepted asynchronously and not confirmed,
-        // so "ok" here means accepted for dispatch, not delivered.
+        // Delivery is accepted asynchronously, so "ok" here means accepted
+        // for dispatch, not confirmed delivered.
         return { ok: true, messageId: result?.id };
       } catch (error) {
-        return { ok: false, error: describe(error) };
+        return { ok: false, error: explainError(error, to) };
       }
     },
 
@@ -225,10 +372,17 @@ export function createPhotonTransport(config: PhotonConfig): MessageTransport {
       }
       try {
         const photon = await getClient();
-        await photon.projects.listMessages({ path: { id: projectId } });
-        return { ok: true, detail: "Photon API reachable" };
+        await photon.projects.get({ path: { projectId } });
       } catch (error) {
         return { ok: false, detail: `Photon API unreachable: ${describe(error)}` };
+      }
+      // Reachable but with no line assigned, nothing can be sent, so that is
+      // not healthy — and it is a setup mistake worth naming before a demo.
+      try {
+        const senderId = await resolveSenderId();
+        return { ok: true, detail: `Photon API reachable; sending line ${senderId}` };
+      } catch (error) {
+        return { ok: false, detail: describe(error) };
       }
     },
   };
@@ -239,9 +393,9 @@ function defaultClientFactory(apiKey: string): () => Promise<PhotonLikeClient> {
     let module: Record<string, unknown>;
     try {
       // Dynamic so the service starts, and runs in stub mode, with no deps
-      // installed. The package name is from photon.codes/docs/beta.
+      // installed. Package: @photon-ai/api (verified present on npm).
       module = (await import("@photon-ai/api")) as Record<string, unknown>;
-    } catch (error) {
+    } catch {
       throw new Error(
         "@photon-ai/api is not installed. Run `npm install` in photon-service/, " +
           "or leave PHOTON_API_KEY unset to run in stub mode.",

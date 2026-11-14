@@ -13,19 +13,37 @@
 
 export class TTSPlayer {
   constructor() {
-    this.audio = new Audio();
-    this.audio.preload = 'auto';
+    this.audio = null;
     this.unlocked = false;
     this.lastObjectUrl = null;
+  }
+
+  /**
+   * The audio element, created on first use.
+   *
+   * Deliberately not built in the constructor: `TalkMode` constructs a player
+   * eagerly, and an environment without `Audio` — a test harness, or a
+   * browser that blocks media — would then fail at construction and take the
+   * whole result card with it. Speech is the one thing here that is allowed
+   * to be missing, so its absence degrades to the browser voice or silence.
+   */
+  element() {
+    if (this.audio) return this.audio;
+    if (typeof Audio !== 'function') return null;
+    this.audio = new Audio();
+    this.audio.preload = 'auto';
+    return this.audio;
   }
 
   /** Let Safari know the audio element is user-initiated. Harmless elsewhere. */
   unlock() {
     if (this.unlocked) return;
+    const audio = this.element();
+    if (!audio) return;
     this.unlocked = true;
     // A zero-length play attempt is enough to mark the element as permitted.
-    this.audio.play().catch(() => {});
-    this.audio.pause();
+    audio.play().catch(() => {});
+    audio.pause();
   }
 
   /**
@@ -39,13 +57,16 @@ export class TTSPlayer {
     this.stop();
 
     try {
-      const response = await fetch(`/api/tts?text=${encodeURIComponent(message)}`);
-      if (response.ok) {
+      const audio = this.element();
+      const response = audio
+        ? await fetch(`/api/tts?text=${encodeURIComponent(message)}`)
+        : null;
+      if (response?.ok) {
         const blob = await response.blob();
         if (blob.size > 0) {
           this.lastObjectUrl = URL.createObjectURL(blob);
-          this.audio.src = this.lastObjectUrl;
-          await this.audio.play();
+          audio.src = this.lastObjectUrl;
+          await audio.play();
           return 'elevenlabs';
         }
       }
@@ -73,8 +94,10 @@ export class TTSPlayer {
   /** Stop whatever is speaking and release the last blob. */
   stop() {
     try {
-      this.audio.pause();
-      this.audio.currentTime = 0;
+      if (this.audio) {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      }
     } catch {
       /* no source yet */
     }

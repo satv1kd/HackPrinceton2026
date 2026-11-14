@@ -34,6 +34,7 @@ node src/index.ts
 |---|---|
 | `PHOTON_API_KEY` | Project API key. Needs `project:read` and `project:write`; assigning a line also needs `platforms:write`. |
 | `PHOTON_PROJECT_ID` | The project the line belongs to. |
+| `PHOTON_SENDER_ID` | Optional. The line to send from, needed only if the project has more than one; otherwise discovered. |
 | `PHOTON_MODE` | `stub` or `live`. Defaults to `live` when both of the above are set, else `stub`. |
 | `PORT` | Defaults to `3001`. Must match `PHOTON_SERVICE_URL` in the app's `.env`. |
 
@@ -53,11 +54,15 @@ Two consequences change the product, not just this service:
    exactly `ping`, as an iMessage, not SMS. Until they do there is no
    conversation to reply into, so "Send to Mom" fails with a message saying
    precisely that.
-2. **Sending is reply-shaped.** It needs `spaceId`, `senderId` and
-   `parentMessageId` from an incoming message, so the relay looks up the
-   conversation for a handle (`listMessages`) before it can send
-   (`sendMessage`). A handle matches on its last ten digits, so
-   `4155550123` in `contacts.json` matches `+1 (415) 555-0123` from Photon.
+2. **Sending needs a resolved conversation, and your own line as sender.**
+   `sendMessage` takes a `spaceId` and a `senderId`, and `senderId` must be
+   *our line*, not the recipient. So a send is three calls:
+   `createOrGetUser` (handle -> user), `createOrGetSpace` (our line + them ->
+   conversation), then `sendMessage`. Both of the first two are idempotent.
+   The line itself is found once via `listUsers`, picking the user that
+   carries `details.type` (`shared` or `dedicated`); set `PHOTON_SENDER_ID`
+   if a project has several. Handles go out as E.164, so `4155550123` in
+   `contacts.json` is sent as `+14155550123`.
 
 Also: Photon beta iMessage carries **text and images only** — no tapbacks,
 effects or voice notes. Delivery is accepted asynchronously and *not
@@ -75,13 +80,40 @@ confirmed*, so `{ok: true}` means "accepted for dispatch", not "delivered".
 5. Put the handle of each such contact in `data/contacts.json` (copy
    `data/contacts.example.json`).
 
-## Unverified
+## What is verified, and what is not
 
-The SDK call shapes in `src/transport.ts` come from the beta iMessage guide,
-not from a successful live call — nobody has run this against a real Photon
-project yet. The guide does not state `sendMessage`'s return shape, so the
-`messageId` is read defensively. If the SDK differs, `src/transport.ts` is
-the only file that changes.
+**Verified against the real SDK.** `src/transport.ts` talks to Photon through
+a hand-written `PhotonLikeClient` interface so the relay can run and be tested
+with nothing installed. `src/photon-contract.ts` stops that interface drifting
+from reality: it imports the type declarations published in
+`@photon-ai/api@0.6.0` and asserts, at compile time, both that a real client
+satisfies our interface and that the exact argument objects this service
+builds are assignable to the SDK's own `$strict` input schemas. So the
+namespace (`projects`), the `{ path, body, headers }` envelopes, the required
+`idempotency-key` headers, the `{ items }` list envelope and every field name
+are the SDK's, not a guess.
+
+```bash
+npm install && npm run typecheck   # fails if the shapes drift
+```
+
+That check earns its keep: it caught `getProject` wanting `path.projectId`
+while the message, user and space operations want `path.id`.
+
+The `SHARED_LINE_INBOUND_REQUIRED` and `SHARED_LINE_NOT_ASSIGNED` problem
+codes are also real — they are in the SDK's generated error types, which is
+independent confirmation of the "they must text you first" constraint above.
+
+**Not verified.** No call has been made against the live API, because no
+account was available. Two things only a real send can settle:
+
+- `content.format: "plain"`. The SDK types it as a free `string`, so nothing
+  checks the value. If Photon rejects it, that one literal in
+  `src/transport.ts` is what changes.
+- Whether the live service behaves as its own types claim, and whether
+  `createOrGetSpace` or `sendMessage` is the call that refuses a contact who
+  has not texted in. Both paths map to the same explanation, so either way the
+  user sees the right message.
 
 ## Tests
 
@@ -89,5 +121,6 @@ the only file that changes.
 node --test ../tests/photon-service.test.mjs
 ```
 
-24 tests, no npm install and no Photon account: the SDK is injected as a fake
-through `clientFactory`.
+29 tests, no npm install and no Photon account: the SDK is injected as a fake
+through `clientFactory`. `npm run typecheck` is the separate, stronger check
+described above and does need `npm install`.
