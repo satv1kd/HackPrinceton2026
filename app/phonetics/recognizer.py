@@ -330,6 +330,20 @@ class PhonemeRecognizer:
                 return cached
 
         samples, sample_rate = read_pcm_wav(wav_path)
+        return self.recognize_samples(samples, sample_rate, cache_id=cache_id,
+                                      want_posteriors=want_posteriors)
+
+    def recognize_samples(
+        self,
+        samples: np.ndarray,
+        sample_rate: int,
+        cache_id: Optional[str] = None,
+        want_posteriors: bool = True,
+    ) -> PhonemeRecognition:
+        """Recognize audio already in memory (16 kHz mono float32), caching by *cache_id*."""
+        if sample_rate != REQUIRED_SAMPLE_RATE:
+            raise PhonemeRecognizerError(f"audio must be {REQUIRED_SAMPLE_RATE} Hz, got {sample_rate}")
+        samples = np.asarray(samples, dtype=np.float32)
         duration = len(samples) / sample_rate
 
         started = time.perf_counter()

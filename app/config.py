@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # evaluation task (34) replaces them with measured values.
     PHONEME_MODEL: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
     PHONEME_MODEL_OFFLINE: bool = False
+    # Turn the phoneme engine off entirely (tests do; it is also a kill switch).
+    PHONEMES_ENABLED: bool = True
     PHONEME_CACHE_DIR: Optional[Path] = None  # None means DATA_DIR / "phonemes"
     MIN_PHONEME_OCCURRENCES: int = 2
     LEXICON_SIZE: int = 5000

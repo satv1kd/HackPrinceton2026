@@ -3,6 +3,7 @@
 from functools import lru_cache
 
 from app.config import get_settings
+from app.phonetics.service import PhonemeService
 from app.services.audio import AudioPreprocessor
 from app.services.calibration import CalibrationStore
 from app.services.features import FeatureCache, get_extractor
@@ -48,8 +49,17 @@ def get_preference_store() -> PreferenceStore:
 
 
 @lru_cache
+def get_phoneme_service() -> PhonemeService:
+    """One phoneme model per process; loaded in the background at startup."""
+    return PhonemeService.from_settings(get_settings())
+
+
+@lru_cache
 def get_phonetic_readiness() -> PhoneticReadiness:
-    return PhoneticReadiness()
+    # Checked in order; the first unmet one is the reason shown by the switch.
+    from app.services.preferences import _engine_not_built
+
+    return PhoneticReadiness([get_phoneme_service().unavailable_reason, _engine_not_built])
 
 
 @lru_cache
@@ -64,3 +74,6 @@ def reset_caches() -> None:
                get_preference_store, get_phonetic_readiness, get_stt_backend,
                get_calibration_preprocessor, get_calibration_store):
         fn.cache_clear()
+    if get_phoneme_service.cache_info().currsize:
+        get_phoneme_service().shutdown()
+    get_phoneme_service.cache_clear()

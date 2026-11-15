@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.deps import (get_calibration_preprocessor, get_calibration_store, get_feature_cache,
-                      get_store, get_stt_backend)
+                      get_phoneme_service, get_store, get_stt_backend)
+from app.phonetics.service import PhonemeService, take_cache_id
 from app.phonetics.enrollment import TAKES_PER_PHRASE, enrollment_phrase, load_enrollment_set
 from app.services.audio import AudioPreprocessor, AudioProcessingError, AudioTooShortError
 from app.services.calibration import MAX_TAKES, CalibrationStore
@@ -32,6 +33,7 @@ def get_linker() -> EnrollmentLinker:
 
 
 Linker = Annotated[EnrollmentLinker, Depends(get_linker)]
+Phonemes = Annotated[PhonemeService, Depends(get_phoneme_service)]
 TakeQuery = Annotated[int, Query(ge=1, le=MAX_TAKES)]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -111,6 +113,7 @@ def enrollment_set(store: Store):
 
 @router.post("/sentences", response_model=SentenceOut)
 async def save_sentence(store: Store, preprocessor: Preprocessor, backend: Backend, linker: Linker,
+                        phonemes: Phonemes,
                         sentence_id: Annotated[str, Form(min_length=1, max_length=40)],
                         text: Annotated[str, Form(min_length=1, max_length=400)],
                         take: Annotated[int, Form(ge=1, le=MAX_TAKES)] = 1,
@@ -154,6 +157,11 @@ async def save_sentence(store: Store, preprocessor: Preprocessor, backend: Backe
             phrase, processed.wav_bytes, processed.samples, processed.sr, processed.duration_sec,
             previous_sample_id=(previous or {}).get("sample_id"))
         result = store.update_record(record.id, take, phrase_id=phrase_id, sample_id=sample_id) or result
+    # The sound profile needs to know which phonemes the model heard in this
+    # take; work it out in the background so the page is not kept waiting.
+    take_path = store.resolve(result.get("audio_path") or "")
+    if take_path is not None:
+        phonemes.recognize_file_async(take_path, take_cache_id(record.id, take))
     return _out(result)
 
 
@@ -182,7 +190,7 @@ def word_audio(sentence_id: str, index: int, store: Store, take: TakeQuery = 1):
 
 
 @router.delete("/sentences/{sentence_id}", status_code=204)
-def delete_sentence(sentence_id: str, store: Store, linker: Linker,
+def delete_sentence(sentence_id: str, store: Store, linker: Linker, phonemes: Phonemes,
                     take: Annotated[Optional[int], Query(ge=1, le=MAX_TAKES)] = None):
     """Delete one take (``?take=n``) or all of them, with their Talk samples."""
     try:
@@ -192,6 +200,7 @@ def delete_sentence(sentence_id: str, store: Store, linker: Linker,
     if not deleted:
         raise HTTPException(404, "No recording for that sentence")
     for record in deleted:
+        phonemes.forget(take_cache_id(record["id"], int(record.get("take", 1) or 1)))
         if record.get("phrase_id") and record.get("sample_id"):
             linker.remove_sample(record["phrase_id"], record["sample_id"])
 
