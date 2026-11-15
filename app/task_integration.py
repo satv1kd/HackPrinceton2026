@@ -1,6 +1,7 @@
 """Connect recognition/feedback to the foundation's shared service instances."""
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from starlette.concurrency import run_in_threadpool
@@ -10,6 +11,7 @@ from app.services.attempts import AttemptStore
 from app.services.feedback import FeedbackStore
 from app.services.matcher import DTWMatcher
 from app.services.recognition import RecognitionService
+from app.services.transcriber import Transcriber
 
 
 def foundation_services():
@@ -52,9 +54,17 @@ def install_tasks_5_8(app, *, services_factory=None, **services):
                 max_samples=config.MAX_SAMPLES_PER_PHRASE,
                 undo_seconds=config.UNDO_WINDOW_SECONDS if hasattr(config, 'UNDO_WINDOW_SECONDS') else 10)
             application.state.feedback_store = store
+            transcriber = dependencies.get('transcriber')
+            if transcriber is None and 'transcriber' not in dependencies:
+                transcriber = Transcriber.from_settings(config)
+            if transcriber is not None:
+                # Load Whisper in the background so the first Talk press is
+                # not a minute-long wait (first run also downloads the model).
+                threading.Thread(target=transcriber.warm_up, name='whisper-warmup', daemon=True).start()
+            application.state.transcriber = transcriber
             application.state.recognition_service = RecognitionService(
                 dependencies['preprocessor'], dependencies['extractor'],
-                DTWMatcher(config, phrase_store, cache), attempts)
+                DTWMatcher(config, phrase_store, cache), attempts, transcriber=transcriber)
             await run_in_threadpool(store.maintenance)
             stop = asyncio.Event()
             task = asyncio.create_task(maintain(stop, store))

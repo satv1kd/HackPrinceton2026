@@ -18,6 +18,8 @@ class MatchResult(BaseModel):
     attempt_id: str
     confident: bool
     candidates: list[MatchCandidate]
+    #: What local speech-to-text heard, verbatim (None when unavailable).
+    transcript: str | None = None
 
 
 class PhraseLabel(BaseModel):

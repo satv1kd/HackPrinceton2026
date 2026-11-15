@@ -100,7 +100,12 @@ export class TalkMode {
       this.result = result;
       this.showResult();
       this.autoSpeak();
-      this.setState('idle', result.candidates.length ? 'Choose a phrase or tell us if we heard you right.' : 'No matching phrases are available yet.');
+      const lead = result.candidates[0];
+      this.setState('idle', !lead
+        ? 'We couldn’t make out any words that time. Take your time and try again.'
+        : !result.confident ? 'Tap the one you meant.'
+        : lead.type === 'generated' ? 'Is that what you said? Tap yes and we’ll say it out loud.'
+        : 'Tell us if we heard you right.');
     } catch (error) {
       if (generation !== this.generation) return;
       const message = error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow it in your browser settings, then try again.' : error.name === 'NotFoundError' ? 'No microphone was found.' : error.message;
@@ -132,9 +137,40 @@ export class TalkMode {
     list.replaceChildren();
     card.hidden = candidates.length === 0;
     feedback.hidden = !confident || candidates.length === 0;
+    const heard = document.getElementById('heard-line');
+    if (heard) heard.hidden = true;
     if (!candidates.length) return;
+    const top = candidates[0];
     document.getElementById('result-heading').textContent = confident ? 'DID WE HEAR YOU RIGHT?' : 'WHICH ONE DID YOU MEAN?';
-    document.getElementById('result-text').textContent = confident ? `${candidates[0].emoji || '💬'} ${candidates[0].text}` : 'Tap the phrase you meant.';
+    // A transcript is shown as the words themselves; a saved phrase keeps the
+    // picture the user chose for it.
+    document.getElementById('result-text').textContent = !confident
+      ? 'Tap the phrase you meant.'
+      : top.type === 'generated' ? `“${top.text}”` : `${top.emoji || '💬'} ${top.text}`;
+    // When a saved phrase leads (e.g. a personal word like "wawa"), say what
+    // the transcriber literally heard, so the person can see why.
+    const transcript = this.result.transcript;
+    if (heard && confident && top.type === 'phrase' && transcript
+        && transcript.trim().toLowerCase().replace(/[.!?,]/g, '') !== top.text.trim().toLowerCase().replace(/[.!?,]/g, '')) {
+      heard.textContent = `We heard “${transcript}”`;
+      heard.hidden = false;
+    }
+    if (confident && candidates.length > 1) {
+      // Alternatives stay one tap away. Picking one corrects our first guess.
+      const intro = document.createElement('p');
+      intro.className = 'alt-intro';
+      intro.textContent = 'Or did you mean';
+      list.append(intro);
+      for (const candidate of candidates.slice(1, 3)) {
+        const button = document.createElement('button');
+        button.className = 'alt-option';
+        button.textContent = candidate.type === 'generated'
+          ? `“${candidate.text}”`
+          : `${candidate.emoji || '💬'} ${candidate.text}`;
+        button.onclick = () => this.sendFeedback(false, candidate);
+        list.append(button);
+      }
+    }
     if (!confident) {
       for (const candidate of candidates.slice(0, 3)) {
         const button = document.createElement('button');
@@ -232,8 +268,11 @@ export class TalkMode {
       const response = await postJSON('/api/feedback', { attempt_id: attemptId, correct, label });
       if (candidate && this.result?.attempt_id === attemptId) {
         document.getElementById('result-heading').textContent = 'YOUR WORDS';
-        document.getElementById('result-text').textContent = `${candidate.emoji || '💬'} ${candidate.text}`;
+        document.getElementById('result-text').textContent = candidate.type === 'generated'
+          ? `“${candidate.text}”` : `${candidate.emoji || '💬'} ${candidate.text}`;
         document.getElementById('candidate-list').replaceChildren();
+        const heardLine = document.getElementById('heard-line');
+        if (heardLine) heardLine.hidden = true;
         document.getElementById('feedback-buttons').hidden = true;
         document.getElementById('result-card').hidden = false;
         // Confirmed, so it is safe to say out loud and safe to send. Skip the

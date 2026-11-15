@@ -54,6 +54,9 @@ def encode(audio: np.ndarray, fmt: str, sr: int = 48000) -> bytes:
 def data_dir(tmp_path, monkeypatch):
     d = tmp_path / "data"
     monkeypatch.setenv("DATA_DIR", str(d))
+    # Whisper is exercised with a fake model in test_transcription.py; the
+    # rest of the suite must not load (or download) the real one.
+    monkeypatch.setenv("TRANSCRIBE_ENABLED", "false")
     reset_caches()
     yield d
     reset_caches()

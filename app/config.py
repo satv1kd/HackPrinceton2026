@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     MIN_CLIP_SEC: float = 0.3
     MAX_CLIP_SEC: float = 10.0
 
+    # Talk-mode transcription (local faster-whisper; audio never leaves the
+    # machine). Measured on a 12-thread laptop CPU, per ~2 s clip:
+    #   base.en, 4 threads, greedy  ~1.2 s   (default)
+    #   small.en, 4 threads, greedy ~3.7 s   (try if accuracy falls short)
+    # More threads was slower, not faster; the 30 s encoder pass dominates.
+    # Set TRANSCRIBE_ENABLED=false to fall back to saved-phrase matching only.
+    TRANSCRIBE_ENABLED: bool = True
+    WHISPER_MODEL: str = "base.en"
+    WHISPER_DEVICE: str = "cpu"
+    WHISPER_COMPUTE_TYPE: str = "int8"
+    WHISPER_CPU_THREADS: int = 4
+    WHISPER_BEAM_SIZE: int = 1
+
 
 @lru_cache
 def get_settings() -> Settings:
