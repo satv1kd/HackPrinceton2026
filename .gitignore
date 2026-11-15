@@ -45,6 +45,7 @@ data/lexicon/
 data/contacts.json
 data/feedback.jsonl
 data/phrases.json
+data/preferences.json
 data/feedback-backups/
 # Runtime lock files the app writes while it is running.
 data/*.lock
