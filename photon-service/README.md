@@ -145,9 +145,11 @@ string.
   answer `401 Missing authorization header` — they are for a signed-in
   dashboard session. That is why health probes `issueImessageTokens`.
 
-**A real message has been sent.** `POST /send` to a real phone answered
+**A real message has been delivered.** `POST /send` to a real phone answered
 `{ok: true, messageId: "spc-msg-…"}`, through the relay and again through
-FastAPI's `/api/send` with the contact resolved from `contacts.json`.
+FastAPI's `/api/send` with the contact resolved from `contacts.json`. Both
+arrived on the handset, so the path is confirmed end to end — including that
+`content` as a bare string is what the iMessage provider wants.
 
 Before the account had a phone connected, the same send was refused with
 `[spectrum-imessage] Target not allowed for this project` — no code, no hint
@@ -159,8 +161,13 @@ stays green; an earlier version of this file failed health on it and would
 have called a working setup broken.
 
 Still unknown: whether holding one Spectrum app open and sending into it per
-HTTP request behaves over hours rather than over a handful of calls, and
-whether delivery (as opposed to acceptance) ever reports back.
+HTTP request behaves over hours rather than over a handful of calls. If sends
+begin failing after a long idle, that is the first thing to suspect, and the
+fix is to rebuild the app on a send failure rather than only on a start one.
+
+Note that `{ok: true}` still means *accepted*, not delivered: the SDK offers
+no delivery callback, so the two confirmations above came from looking at the
+phone.
 
 ## Tests
 
