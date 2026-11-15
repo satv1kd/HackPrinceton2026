@@ -69,4 +69,6 @@ fi
 # Exec would discard the trap, so run in the foreground and wait instead.
 "$UVICORN" app.main:app --reload --host 0.0.0.0 --port "$PORT" &
 PIDS+=($!)
-wait -n
+# macOS ships Bash 3.2, which does not support `wait -n`. Waiting on the
+# server keeps the launcher alive and lets the EXIT trap clean up its children.
+wait "$!"
