@@ -127,8 +127,8 @@ def test_delete_and_missing_lookups(tmp_path):
     store = CalibrationStore(tmp_path)
     store.save_sentence("s01", "one", tone(1.0), SR, heard=[word("one", 0, .5)])
     assert store.get_sentence("s01") is not None
-    assert store.delete_sentence("s01") is True
-    assert store.delete_sentence("s01") is False
+    assert [r["id"] for r in store.delete_sentence("s01")] == ["s01"]
+    assert store.delete_sentence("s01") == []
     assert store.get_sentence("s01") is None
     assert store.list_sentences() == []
 

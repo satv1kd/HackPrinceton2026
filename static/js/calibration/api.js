@@ -10,10 +10,20 @@ export class CalibrationApi {
     this.fetch = fetcher;
   }
 
-  async save({ id, text, blob, mimeType }) {
+  /* The built-in enrollment phrases and how many takes each wants. */
+  async enrollmentSet() {
+    const response = await this.fetch('/api/calibration/enrollment-set');
+    if (!response.ok) throw new Error(await detail(response));
+    const body = await response.json();
+    if (!Array.isArray(body?.phrases) || !body.phrases.length) throw new Error('No phrases to record.');
+    return body;
+  }
+
+  async save({ id, take = 1, text, blob, mimeType }) {
     const body = new FormData();
     body.append('sentence_id', id);
     body.append('text', text);
+    body.append('take', String(take));
     body.append('audio', blob, `${id}.${extensionFor(mimeType)}`);
     const response = await this.fetch(BASE, { method: 'POST', body });
     if (!response.ok) throw new Error(await detail(response));
@@ -27,17 +37,18 @@ export class CalibrationApi {
     return Array.isArray(value) ? value : [];
   }
 
-  async remove(id) {
-    const response = await this.fetch(`${BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  async remove(id, take = null) {
+    const query = take ? `?take=${take}` : '';
+    const response = await this.fetch(`${BASE}/${encodeURIComponent(id)}${query}`, { method: 'DELETE' });
     return response.ok;
   }
 
-  audioUrl(id) {
-    return `${BASE}/${encodeURIComponent(id)}/audio`;
+  audioUrl(id, take = 1) {
+    return `${BASE}/${encodeURIComponent(id)}/audio${take > 1 ? `?take=${take}` : ''}`;
   }
 
-  wordUrl(id, index) {
-    return `${BASE}/${encodeURIComponent(id)}/words/${index}`;
+  wordUrl(id, index, take = 1) {
+    return `${BASE}/${encodeURIComponent(id)}/words/${index}${take > 1 ? `?take=${take}` : ''}`;
   }
 }
 

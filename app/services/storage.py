@@ -105,6 +105,7 @@ class PhraseStore:
         personal_word: bool = False,
         origin: str = "custom",
         phonemes: Optional[list[str]] = None,
+        enrollment_key: Optional[str] = None,
     ) -> Phrase:
         text = text.strip()
         if not text:
@@ -115,12 +116,19 @@ class PhraseStore:
             personal_word=personal_word,
             origin=origin,
             phonemes=None if personal_word else phonemes,
+            enrollment_key=enrollment_key,
         )
         with data_lock(self.data_dir), self._lock:
             phrases = self._load()
+            if enrollment_key and any(p.enrollment_key == enrollment_key for p in phrases):
+                raise ValueError(f"enrollment phrase {enrollment_key!r} already exists")
             phrases.append(phrase)
             self._save(phrases)
         return phrase
+
+    def find_enrollment_phrase(self, enrollment_key: str) -> Optional[Phrase]:
+        with data_lock(self.data_dir), self._lock:
+            return next((p for p in self._load() if p.enrollment_key == enrollment_key), None)
 
     def delete_phrase(self, phrase_id: str) -> None:
         with data_lock(self.data_dir), self._lock:
