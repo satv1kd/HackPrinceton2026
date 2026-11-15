@@ -40,6 +40,7 @@ class TrainingExample:
     key: str                     # take cache id or attempt id
     expected: List[str]
     heard: List[str]
+    text: str = ""               # the words meant (for decoding evaluation)
 
     def alignment(self) -> Alignment:
         return align(self.expected, self.heard)
@@ -56,8 +57,51 @@ def take_examples(calibration_store, phoneme_service) -> List[TrainingExample]:
         recognition = phoneme_service.cached(cache_id)
         if recognition is None or not recognition.phonemes:
             continue
-        examples.append(TrainingExample("take", cache_id, phrase.phonemes, list(recognition.phonemes)))
+        examples.append(TrainingExample("take", cache_id, phrase.phonemes, list(recognition.phonemes),
+                                        phrase.text))
     return examples
+
+
+def is_holdout(attempt_id: str, fraction: float) -> bool:
+    """Stable split: the same attempt is always held out (or never)."""
+    import hashlib
+
+    bucket = int(hashlib.sha1(attempt_id.encode()).hexdigest()[:8], 16) % 1000
+    return bucket < fraction * 1000
+
+
+def feedback_examples(data_dir, phrase_store, lexicon_loader) -> List[TrainingExample]:
+    """Confirmed Talk attempts with recognized phonemes and a label we can pronounce.
+
+    Phrase labels use the phrase's phonemes; typed / generated text uses the
+    word list. Personal words and labels with unknown words are skipped. Undone
+    feedback is already gone from ``active_feedback``.
+    """
+    from app.services.feedback import active_feedback, read_events
+    from app.services.storage import NotFoundError
+
+    lexicon = lexicon_loader()
+    out = []
+    for attempt_id, event in active_feedback(read_events(Path(data_dir) / "feedback.jsonl")).items():
+        heard, label = event.get("recognized_phonemes"), event.get("label")
+        if not heard or not label:
+            continue
+        expected, text = None, ""
+        if label.get("type") == "phrase":
+            try:
+                phrase = phrase_store.get_phrase(label["phrase_id"])
+            except (NotFoundError, KeyError):
+                continue
+            if phrase is None or phrase.personal_word:
+                continue
+            text = phrase.text
+            expected = phrase.phonemes or (lexicon.flat_phonemes(text) if lexicon else None)
+        elif label.get("type") == "text":
+            text = label.get("text", "")
+            expected = lexicon.flat_phonemes(text) if lexicon else None
+        if expected:
+            out.append(TrainingExample("feedback", attempt_id, list(expected), list(heard), text))
+    return out
 
 
 def build_sound_bank(calibration_store, phoneme_service) -> SoundBank:
@@ -111,7 +155,9 @@ class ProfileTrainer:
     """Rebuilds and stores the profile; serialised so rebuilds never overlap."""
 
     def __init__(self, data_dir, calibration_store, phoneme_service, alpha: float,
-                 min_occurrences: int, feedback_examples=None):
+                 min_occurrences: int, feedback_examples=None, lexicon_loader=None,
+                 retrain_after: int = 10, holdout_fraction: float = 0.2, lm_weight: float = 0.3,
+                 max_words: int = 6):
         self.store = ProfileStore(data_dir)
         self.calibration_store = calibration_store
         self.phoneme_service = phoneme_service
@@ -119,21 +165,44 @@ class ProfileTrainer:
         self.min_occurrences = min_occurrences
         #: Callable returning extra examples from confirmed Talk attempts (Task 31).
         self.feedback_examples = feedback_examples
+        self.lexicon_loader = lexicon_loader
+        self.retrain_after, self.holdout_fraction = retrain_after, holdout_fraction
+        self.lm_weight, self.max_words = lm_weight, max_words
+        self.log_path = Path(data_dir) / "profile" / "retrain_log.json"
+        self._retraining = threading.Lock()
         self.bank_dir = Path(data_dir) / "sound_bank"
         self._bank: Optional[SoundBank] = None
         self._lock = threading.Lock()
 
     @classmethod
-    def from_settings(cls, settings, calibration_store, phoneme_service, feedback_examples=None):
+    def from_settings(cls, settings, calibration_store, phoneme_service, feedback_examples=None,
+                      lexicon_loader=None):
         return cls(settings.DATA_DIR, calibration_store, phoneme_service,
                    settings.PROFILE_SMOOTHING_ALPHA, settings.MIN_PHONEME_OCCURRENCES,
-                   feedback_examples)
+                   feedback_examples, lexicon_loader, settings.RETRAIN_MIN_NEW_EXAMPLES,
+                   settings.HOLDOUT_FRACTION, settings.LM_WEIGHT, settings.MAX_DECODE_WORDS)
+
+    # -- examples -------------------------------------------------------------
+
+    def _feedback(self) -> List[TrainingExample]:
+        return list(self.feedback_examples()) if self.feedback_examples is not None else []
+
+    def split_feedback(self):
+        """(training, held-out) feedback examples; held-out ones never train."""
+        train, holdout = [], []
+        for example in self._feedback():
+            (holdout if is_holdout(example.key, self.holdout_fraction) else train).append(example)
+        return train, holdout
 
     def examples(self) -> List[TrainingExample]:
-        examples = take_examples(self.calibration_store, self.phoneme_service)
-        if self.feedback_examples is not None:
-            examples += list(self.feedback_examples())
-        return examples
+        return take_examples(self.calibration_store, self.phoneme_service) + self.split_feedback()[0]
+
+    # -- building -------------------------------------------------------------
+
+    def _build(self, examples) -> SoundProfile:
+        profile = build_profile(examples, self.alpha)
+        profile.trained_on = sorted(e.key for e in examples if e.source == "feedback")
+        return profile
 
     def rebuild(self) -> Optional[SoundProfile]:
         """Build from every example and make it current. None when there is no data."""
@@ -141,7 +210,7 @@ class ProfileTrainer:
             examples = self.examples()
             if not examples:
                 return None
-            profile = build_profile(examples, self.alpha)
+            profile = self._build(examples)
             self.store.save(profile)
             try:
                 bank = build_sound_bank(self.calibration_store, self.phoneme_service)
@@ -159,6 +228,104 @@ class ProfileTrainer:
 
     def current(self) -> Optional[SoundProfile]:
         return self.store.load()
+
+    # -- retraining from feedback (Task 31) --------------------------------------
+
+    def pending_counts(self) -> dict:
+        """New (not yet learned) training examples per intended phoneme."""
+        current = self.current()
+        seen = set(current.trained_on) if current else set()
+        counts: dict = {}
+        for example in self.split_feedback()[0]:
+            if example.key in seen:
+                continue
+            for phoneme in example.expected:
+                counts[phoneme] = counts.get(phoneme, 0) + 1
+        return counts
+
+    def due(self) -> bool:
+        pending = self.pending_counts()
+        return bool(pending) and max(pending.values()) >= self.retrain_after
+
+    def on_feedback(self) -> bool:
+        """Called after each Yes/No/correction. Starts a background retrain when due."""
+        if self.current() is None or not self.due() or self._retraining.locked():
+            return False
+        threading.Thread(target=self.retrain, kwargs={"trigger": "feedback"}, daemon=True,
+                         name="profile-retrain").start()
+        return True
+
+    def evaluate(self, profile: SoundProfile, examples: List[TrainingExample]) -> Optional[dict]:
+        """Decode each held-out attempt with *profile*; top-1 / top-3 sentence accuracy."""
+        from app.phonetics.decoder import PhoneticDecoder
+        from app.phonetics.lexicon import tokenize
+
+        lexicon = self.lexicon_loader() if self.lexicon_loader else None
+        usable = [e for e in examples if e.text]
+        if lexicon is None or not usable:
+            return None
+        decoder = PhoneticDecoder(lexicon, profile, self.lm_weight, self.max_words)
+        top1 = top3 = 0
+        for example in usable:
+            want = tuple(tokenize(example.text))
+            got = [h.words for h in decoder.decode(example.heard, k=3)]
+            top1 += bool(got) and got[0] == want
+            top3 += want in got
+        n = len(usable)
+        return {"n": n, "top1": round(top1 / n, 4), "top3": round(top3 / n, 4)}
+
+    def retrain(self, trigger: str = "manual") -> dict:
+        """Rebuild with all new feedback; keep it only if held-out accuracy does not drop."""
+        if not self._retraining.acquire(blocking=False):
+            return {"status": "busy"}
+        try:
+            current = self.current()
+            examples = self.examples()
+            if not examples:
+                return {"status": "no_data"}
+            _train, holdout = self.split_feedback()
+            candidate = self._build(examples)
+            before = self.evaluate(current, holdout) if current else None
+            after = self.evaluate(candidate, holdout)
+            better = (before is None or after is None
+                      or (after["top3"], after["top1"]) >= (before["top3"], before["top1"]))
+            with self._lock:
+                saved = self.store.save(candidate, activate=better)
+            if better:
+                try:
+                    bank = build_sound_bank(self.calibration_store, self.phoneme_service)
+                    bank.save(self.bank_dir)
+                    self._bank = bank
+                except Exception:
+                    log.exception("could not rebuild the sound bank")
+            entry = {"at": saved.created_at, "trigger": trigger, "candidate_version": saved.version,
+                     "promoted": better, "current_version": self.store.current_version(),
+                     "holdout": len(holdout), "before": before, "after": after,
+                     "learned_from": saved.sources}
+            self._log(entry)
+            log.info("profile retrain (%s): v%s %s", trigger, saved.version,
+                     "promoted" if better else "kept previous")
+            return {"status": "promoted" if better else "rolled_back", **entry}
+        finally:
+            self._retraining.release()
+
+    def _log(self, entry: dict) -> None:
+        import json
+
+        from app.services.storage import atomic_write_json
+        try:
+            history = json.loads(self.log_path.read_text())
+        except (OSError, ValueError):
+            history = []
+        atomic_write_json(self.log_path, (history + [entry])[-50:])
+
+    def last_retrain(self) -> Optional[dict]:
+        import json
+        try:
+            history = json.loads(self.log_path.read_text())
+        except (OSError, ValueError):
+            return None
+        return history[-1] if history else None
 
     def readiness(self) -> Optional[str]:
         return profile_readiness(self.current(), self.min_occurrences)

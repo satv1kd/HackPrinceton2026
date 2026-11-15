@@ -81,3 +81,10 @@ def rebuild(trainer: Trainer, settings: Config):
     """Rebuild from every recording now (normally automatic)."""
     trainer.rebuild()
     return get_profile(trainer, settings)
+
+
+@router.post("/retrain")
+def retrain(trainer: Trainer):
+    """Retrain from feedback now, with held-out validation (normally automatic
+    once a sound has RETRAIN_MIN_NEW_EXAMPLES new examples)."""
+    return trainer.retrain(trigger="manual")

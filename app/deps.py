@@ -56,9 +56,13 @@ def get_phoneme_service() -> PhonemeService:
 
 @lru_cache
 def get_profile_trainer():
-    from app.phonetics.training import ProfileTrainer
+    from app.phonetics.training import ProfileTrainer, feedback_examples
 
-    return ProfileTrainer.from_settings(get_settings(), get_calibration_store(), get_phoneme_service())
+    settings = get_settings()
+    return ProfileTrainer.from_settings(
+        settings, get_calibration_store(), get_phoneme_service(),
+        feedback_examples=lambda: feedback_examples(settings.DATA_DIR, get_store(), get_lexicon),
+        lexicon_loader=get_lexicon)
 
 
 _LEXICON_UNSET = object()

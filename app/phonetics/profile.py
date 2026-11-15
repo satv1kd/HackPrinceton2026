@@ -73,6 +73,8 @@ class SoundProfile:
     created_at: str = ""
     #: Where the data came from: {"takes": n, "feedback": n}
     sources: Dict[str, int] = field(default_factory=dict)
+    #: Feedback attempts already learned from (so new ones can be counted).
+    trained_on: List[str] = field(default_factory=list)
 
     # -- building -------------------------------------------------------------
 
@@ -137,7 +139,8 @@ class SoundProfile:
 
     def to_json(self) -> dict:
         return {"version": self.version, "created_at": self.created_at, "alpha": self.alpha,
-                "counts": self.counts, "insertions": self.insertions, "sources": self.sources}
+                "counts": self.counts, "insertions": self.insertions, "sources": self.sources,
+                "trained_on": self.trained_on}
 
     @classmethod
     def from_json(cls, data: dict) -> "SoundProfile":
@@ -145,7 +148,7 @@ class SoundProfile:
                    counts={p: {r: float(n) for r, n in row.items()} for p, row in data.get("counts", {}).items()},
                    insertions={r: float(n) for r, n in data.get("insertions", {}).items()},
                    version=int(data.get("version", 0)), created_at=data.get("created_at", ""),
-                   sources=dict(data.get("sources", {})))
+                   sources=dict(data.get("sources", {})), trained_on=list(data.get("trained_on", [])))
 
 
 class ProfileStore:
