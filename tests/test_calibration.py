@@ -154,20 +154,14 @@ def test_a_take_with_no_transcript_is_still_kept(tmp_path):
 
 # -- through the API ---------------------------------------------------------
 
-class FakeBackend:
-    """Stands in for faster-whisper: says what the test tells it to."""
-
-    def __init__(self, transcript=None, available=True):
-        self.transcript = transcript
-        self._available = available
-        self.vocabulary = None
+class RefusingBackend:
+    """Speech-to-text must not be asked: the take's words are already known."""
 
     def is_available(self):
-        return self._available
+        return True
 
     def transcribe(self, audio, sr, vocabulary=None):
-        self.vocabulary = list(vocabulary or [])
-        return self.transcript
+        raise AssertionError("calibration should not transcribe")
 
 
 @pytest.fixture
@@ -175,15 +169,9 @@ def cal_client(data_dir):
     from app.deps import get_stt_backend
     from app.main import app
 
-    backend = FakeBackend(Transcript(
-        text="both of my tums ache",
-        words=[word("both", 0.0, 0.3), word("of", 0.3, 0.5), word("my", 0.5, 0.8),
-               word("tums", 0.9, 1.3), word("ache", 1.4, 1.9)],
-        avg_logprob=-0.2, no_speech_prob=0.01))
-    app.dependency_overrides[get_stt_backend] = lambda: backend
+    app.dependency_overrides[get_stt_backend] = RefusingBackend
     try:
         with TestClient(app) as client:
-            client.backend = backend
             yield client
     finally:
         app.dependency_overrides.pop(get_stt_backend, None)
@@ -195,26 +183,20 @@ def _upload(client, sentence_id="s04", text="Both of my thumbs ache", seconds=2.
                        files={"audio": ("take.wav", wav_bytes(tone(seconds)), "audio/wav")})
 
 
-def test_api_cuts_the_sentence_into_words(cal_client):
+def test_api_saves_the_take_without_transcribing_it(cal_client):
     response = _upload(cal_client)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["word_count"] == 5 and body["placed_count"] == 5
-    assert body["transcript"] == "both of my tums ache"
-    assert body["words"][3] == {
-        "index": 3, "expected": "thumbs", "heard": "tums", "start": 0.86, "end": 1.34,
-        "match": "positional", "probability": 0.9, "clip": True}
-    # The sentence text is handed to the recognizer as a vocabulary hint.
-    assert cal_client.backend.vocabulary == ["Both of my thumbs ache"]
+    assert body["word_count"] == 5 and body["placed_count"] == 0
+    assert body["transcript"] == "" and [w["expected"] for w in body["words"]] == [
+        "Both", "of", "my", "thumbs", "ache"]
 
 
-def test_api_serves_the_take_and_each_word_clip(cal_client):
+def test_api_serves_the_take(cal_client):
     _upload(cal_client)
     whole = cal_client.get("/api/calibration/sentences/s04/audio")
     assert whole.status_code == 200 and whole.headers["content-type"] == "audio/wav"
-    clip = cal_client.get("/api/calibration/sentences/s04/words/3")
-    assert clip.status_code == 200 and len(clip.content) > 44   # past the WAV header
-    assert cal_client.get("/api/calibration/sentences/s04/words/99").status_code == 404
+    assert cal_client.get("/api/calibration/sentences/s04/words/3").status_code == 404   # no clips cut
     assert cal_client.get("/api/calibration/sentences/nope/audio").status_code == 404
 
 
@@ -225,14 +207,6 @@ def test_api_lists_and_deletes(cal_client):
     assert cal_client.delete("/api/calibration/sentences/s04").status_code == 204
     assert [s["id"] for s in cal_client.get("/api/calibration/sentences").json()] == ["s09"]
     assert cal_client.delete("/api/calibration/sentences/s04").status_code == 404
-
-
-def test_api_keeps_the_take_when_speech_to_text_is_missing(cal_client):
-    cal_client.backend._available = False
-    body = _upload(cal_client).json()
-    assert body["placed_count"] == 0 and body["transcribed"] is False
-    assert body["word_count"] == 5          # every word is listed, just unplaced
-    assert cal_client.get("/api/calibration/sentences/s04/audio").status_code == 200
 
 
 def test_api_rejects_silence_with_a_kind_status(cal_client):

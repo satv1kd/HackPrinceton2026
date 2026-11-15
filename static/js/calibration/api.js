@@ -1,7 +1,8 @@
 /* The calibration page's one talking point with the server.
 
-   A sentence goes up whole; the server cuts it into word clips using the
-   speech-to-text word timings and hands back what it managed to place. */
+   Each take goes up whole and is saved as it is: the person read the phrase
+   on screen, so nothing needs transcribing. The sound engine lines the take
+   up against the phrase's sounds afterwards, in the background. */
 
 const BASE = '/api/calibration/sentences';
 
@@ -45,10 +46,6 @@ export class CalibrationApi {
 
   audioUrl(id, take = 1) {
     return `${BASE}/${encodeURIComponent(id)}/audio${take > 1 ? `?take=${take}` : ''}`;
-  }
-
-  wordUrl(id, index, take = 1) {
-    return `${BASE}/${encodeURIComponent(id)}/words/${index}${take > 1 ? `?take=${take}` : ''}`;
   }
 }
 

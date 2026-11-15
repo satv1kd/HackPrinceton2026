@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Turn the phoneme engine off entirely (tests do; it is also a kill switch).
     PHONEMES_ENABLED: bool = True
     PHONEME_CACHE_DIR: Optional[Path] = None  # None means DATA_DIR / "phonemes"
+    # CPU threads for the phoneme model (ignored on a GPU). On a 12-core M2 Max
+    # a 2 s clip took 0.18 s at 2 threads and 0.16 s at 4, 6, 8 or 12, so
+    # more threads only take cores from speech-to-text and the server.
+    PHONEME_CPU_THREADS: int = 4
     MIN_PHONEME_OCCURRENCES: int = 2
     LEXICON_SIZE: int = 5000
     MAX_DECODE_WORDS: int = 6

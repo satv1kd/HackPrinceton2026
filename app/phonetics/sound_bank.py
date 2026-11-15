@@ -10,6 +10,12 @@ the decoder proposes can be checked against the recording acoustically
 Features are fine-grained MFCCs (10 ms hop, 13 + deltas, CMVN per take),
 separate from the 32 ms whole-phrase features, because phonemes are short.
 Stored as one ``.npz`` (units) + ``.json`` (index) under DATA_DIR/sound_bank.
+
+Every unit is kept (ordered most typical first), so one take can be swapped
+in or out with :meth:`SoundBank.update` without rebuilding the rest.
+Distances use librosa's compiled DTW: exact, and an order of magnitude faster
+than ``fastdtw`` with a Python distance function, which matters because
+ordering a sound's units compares every pair of them.
 """
 
 from __future__ import annotations
@@ -18,11 +24,9 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
-from fastdtw import fastdtw
-
 log = logging.getLogger(__name__)
 
 SR = 16000
@@ -30,8 +34,8 @@ HOP = 160            # 10 ms
 N_FFT = 400          # 25 ms
 #: Segments the aligner was unsure of (mean posterior below this) are skipped.
 MIN_SEGMENT_CONFIDENCE = 0.05
-#: Units kept per phoneme (most typical first).
-MAX_UNITS = 5
+#: Index format: 2 keeps every unit; 1 (a bare list) kept only the top 5.
+FORMAT = 2
 
 
 def fine_features(audio: np.ndarray, sr: int = SR) -> np.ndarray:
@@ -51,8 +55,12 @@ def fine_features(audio: np.ndarray, sr: int = SR) -> np.ndarray:
 
 
 def _distance(a: np.ndarray, b: np.ndarray) -> float:
-    total, path = fastdtw(a, b, dist=lambda x, y: float(np.linalg.norm(x - y)))
-    return float(total / len(path))
+    """Path-normalised DTW distance (Euclidean frames) between (frames, dims) arrays."""
+    from librosa.sequence import dtw
+
+    cost, path = dtw(X=np.asarray(a, dtype=np.float32).T, Y=np.asarray(b, dtype=np.float32).T,
+                     metric="euclidean", backtrack=True)
+    return float(cost[-1, -1] / len(path))
 
 
 @dataclass
@@ -63,13 +71,16 @@ class Unit:
 
 
 class SoundBank:
-    def __init__(self, units: Optional[Dict[str, List[Unit]]] = None):
+    def __init__(self, units: Optional[Dict[str, List[Unit]]] = None, complete: bool = True):
         self.units: Dict[str, List[Unit]] = units or {}
+        #: False for a bank saved in the old capped format: it lacks units, so
+        #: it must be rebuilt from the takes before it can be updated in place.
+        self.complete = complete
 
     # -- building ---------------------------------------------------------------
 
     def add_take(self, source: str, audio: np.ndarray, sr: int, segments) -> int:
-        """Add the units of one take; returns how many were kept."""
+        """Add the units of one take (call :meth:`finalize` after); returns how many were kept."""
         feats = fine_features(audio, sr)
         rate = sr / HOP
         kept = 0
@@ -84,19 +95,46 @@ class SoundBank:
             kept += 1
         return kept
 
-    def remove_source(self, source: str) -> None:
+    def remove_source(self, source: str) -> set:
+        """Drop one take's units; returns the phonemes that lost any."""
+        touched = set()
         for phoneme in list(self.units):
-            self.units[phoneme] = [u for u in self.units[phoneme] if u.source != source]
-            if not self.units[phoneme]:
+            kept = [u for u in self.units[phoneme] if u.source != source]
+            if len(kept) != len(self.units[phoneme]):
+                touched.add(phoneme)
+            if kept:
+                self.units[phoneme] = kept
+            else:
                 del self.units[phoneme]
+        return touched
 
-    def finalize(self) -> None:
-        """Order each phoneme's units by typicality (medoid first) and cap them."""
-        for phoneme, units in self.units.items():
-            if len(units) > 2:
-                totals = [sum(_distance(u.features, v.features) for v in units if v is not u) for u in units]
-                units = [u for _, u in sorted(zip(totals, units), key=lambda pair: pair[0])]
-            self.units[phoneme] = units[:MAX_UNITS]
+    def finalize(self, phonemes: Optional[Iterable[str]] = None) -> None:
+        """Order units by typicality (medoid first): all phonemes, or just *phonemes*."""
+        for phoneme in (self.units if phonemes is None else [p for p in phonemes if p in self.units]):
+            units = self.units[phoneme]
+            if len(units) <= 2:
+                continue
+            n = len(units)
+            dist = np.zeros((n, n))
+            for i in range(n):
+                for j in range(i + 1, n):
+                    dist[i, j] = dist[j, i] = _distance(units[i].features, units[j].features)
+            order = np.argsort(dist.sum(axis=1), kind="stable")
+            self.units[phoneme] = [units[i] for i in order]
+
+    def update(self, source: str, audio: Optional[np.ndarray] = None, sr: int = SR,
+               segments=()) -> "SoundBank":
+        """A new bank with *source*'s units replaced by this take's (or removed when
+        *audio* is None). Only the phonemes that changed are re-ordered. The bank
+        itself is left alone, so readers holding it never see a half-done update."""
+        bank = SoundBank({p: list(units) for p, units in self.units.items()}, complete=self.complete)
+        touched = bank.remove_source(source)
+        if audio is not None:
+            before = {p: len(u) for p, u in bank.units.items()}
+            bank.add_take(source, audio, sr, segments)
+            touched |= {p for p, u in bank.units.items() if len(u) != before.get(p, 0)}
+        bank.finalize(touched)
+        return bank
 
     # -- using ------------------------------------------------------------------
 
@@ -136,7 +174,8 @@ class SoundBank:
         tmp = folder / "units.tmp.npz"
         np.savez(tmp, **arrays)
         tmp.replace(folder / "units.npz")
-        atomic_write_json(folder / "index.json", index)
+        atomic_write_json(folder / "index.json", {"format": FORMAT, "complete": self.complete,
+                                                  "units": index})
 
     @classmethod
     def load(cls, folder: Path) -> Optional["SoundBank"]:
@@ -146,9 +185,13 @@ class SoundBank:
             arrays = np.load(folder / "units.npz")
         except (OSError, ValueError):
             return None
+        if isinstance(index, dict):
+            items, complete = index.get("units", []), bool(index.get("complete", True))
+        else:
+            items, complete = index, False      # format 1: capped at 5 units per sound
         units: Dict[str, List[Unit]] = {}
-        for item in index:
+        for item in items:
             if item["key"] in arrays:
                 units.setdefault(item["phoneme"], []).append(
                     Unit(item["phoneme"], item["source"], arrays[item["key"]]))
-        return cls(units)
+        return cls(units, complete=complete)

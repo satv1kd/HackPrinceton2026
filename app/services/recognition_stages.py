@@ -13,11 +13,19 @@ spoken or sent: a wrong guess said out loud is worse than one extra tap.
 Adding a recognizer means writing one class with ``name``, ``available``,
 ``enabled`` and ``run``; the router, the response schema and the client do not
 change.
+
+A stage may also have ``prefetch(ctx)``: the cascade calls it while the stage
+*before* it is running, if that stage can never end the cascade by itself, so
+a model can start on the audio early (speech-to-text during phonetic
+decoding). ``run`` then picks up the result from ``ctx.prefetched``. The
+phoneme model gets no head start: it takes ~0.16 s, and behind the phrase
+match the head start was mostly wasted CPU.
 """
 
 from __future__ import annotations
 
 import logging
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
@@ -41,6 +49,8 @@ class RecognitionContext:
     #: Outputs earlier stages leave for later ones and for the attempt record
     #: (e.g. "phrase_result", "transcript", "recognized_phonemes").
     extras: Dict[str, Any] = field(default_factory=dict)
+    #: Work a stage started early (``prefetch``), by stage name. Not saved.
+    prefetched: Dict[str, Future] = field(default_factory=dict)
 
 
 @dataclass
@@ -125,6 +135,7 @@ class SpeechToTextStage:
         self.backend, self.phrase_store = backend, phrase_store
         self._enabled = enabled
         self.phrase_match_min, self.no_speech_max = phrase_match_min, no_speech_max
+        self._pool: Optional[ThreadPoolExecutor] = None
 
     @classmethod
     def from_settings(cls, settings, backend, phrase_store) -> "SpeechToTextStage":
@@ -137,12 +148,20 @@ class SpeechToTextStage:
     def enabled(self, ctx: RecognitionContext) -> bool:
         return True
 
-    def run(self, ctx: RecognitionContext) -> StageResult:
+    def _transcribe(self, ctx: RecognitionContext):
         phrases = list(self.phrase_store.list_phrases())
         # The user's own phrases bias the decoder towards the words they say
         # (names, "nebulizer"), which is most of the accuracy win on base.en.
-        transcript = self.backend.transcribe(
-            ctx.audio, ctx.sr, vocabulary=[p.text for p in phrases])
+        return phrases, self.backend.transcribe(ctx.audio, ctx.sr, vocabulary=[p.text for p in phrases])
+
+    def prefetch(self, ctx: RecognitionContext) -> None:
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
+        ctx.prefetched[self.name] = self._pool.submit(self._transcribe, ctx)
+
+    def run(self, ctx: RecognitionContext) -> StageResult:
+        early = ctx.prefetched.pop(self.name, None)
+        phrases, transcript = early.result() if early is not None else self._transcribe(ctx)
         ctx.extras["transcript"] = transcript.text
         ctx.extras["transcript_words"] = transcript.words
         # ``usable`` also rejects Whisper's stock phrases for silence; the

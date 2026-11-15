@@ -104,29 +104,37 @@ def feedback_examples(data_dir, phrase_store, lexicon_loader) -> List[TrainingEx
     return out
 
 
-def build_sound_bank(calibration_store, phoneme_service) -> SoundBank:
-    """Cut every recognized enrollment take into phoneme units (Task 28)."""
+def take_segments(record: dict, calibration_store, phoneme_service):
+    """(cache id, audio, sr, phoneme segments) for one recognized enrollment take, else None."""
     from app.phonetics.recognizer import read_pcm_wav
     from app.phonetics.segmenter import force_align
 
+    phrase = enrollment_phrase(record["id"])
+    if phrase is None:
+        return None
+    cache_id = take_cache_id(record["id"], int(record.get("take", 1) or 1))
+    recognition = phoneme_service.cached(cache_id, want_posteriors=True)
+    path = calibration_store.resolve(record.get("audio_path") or "")
+    if (recognition is None or recognition.posteriors is None or not recognition.posterior_labels
+            or not recognition.frame_rate_hz or path is None):
+        return None
+    try:
+        audio, sr = read_pcm_wav(path)
+    except Exception:
+        return None
+    segments = force_align(recognition.posteriors, recognition.posterior_labels, phrase.phonemes,
+                           recognition.frame_rate_hz, duration_sec=len(audio) / sr)
+    return cache_id, audio, sr, segments
+
+
+def build_sound_bank(calibration_store, phoneme_service) -> SoundBank:
+    """Cut every recognized enrollment take into phoneme units (Task 28)."""
     bank = SoundBank()
     for record in calibration_store.list_sentences():
-        phrase = enrollment_phrase(record["id"])
-        if phrase is None:
-            continue
-        cache_id = take_cache_id(record["id"], int(record.get("take", 1) or 1))
-        recognition = phoneme_service.cached(cache_id, want_posteriors=True)
-        path = calibration_store.resolve(record.get("audio_path") or "")
-        if (recognition is None or recognition.posteriors is None or not recognition.posterior_labels
-                or not recognition.frame_rate_hz or path is None):
-            continue
-        try:
-            audio, sr = read_pcm_wav(path)
-        except Exception:
-            continue
-        segments = force_align(recognition.posteriors, recognition.posterior_labels, phrase.phonemes,
-                               recognition.frame_rate_hz, duration_sec=len(audio) / sr)
-        bank.add_take(cache_id, audio, sr, segments)
+        found = take_segments(record, calibration_store, phoneme_service)
+        if found is not None:
+            cache_id, audio, sr, segments = found
+            bank.add_take(cache_id, audio, sr, segments)
     bank.finalize()
     return bank
 
@@ -157,7 +165,7 @@ class ProfileTrainer:
     def __init__(self, data_dir, calibration_store, phoneme_service, alpha: float,
                  min_occurrences: int, feedback_examples=None, lexicon_loader=None,
                  retrain_after: int = 10, holdout_fraction: float = 0.2, lm_weight: float = 0.3,
-                 max_words: int = 6):
+                 max_words: int = 6, refresh_delay: float = 1.5):
         self.store = ProfileStore(data_dir)
         self.calibration_store = calibration_store
         self.phoneme_service = phoneme_service
@@ -173,6 +181,12 @@ class ProfileTrainer:
         self.bank_dir = Path(data_dir) / "sound_bank"
         self._bank: Optional[SoundBank] = None
         self._lock = threading.Lock()
+        #: Takes saved or deleted since the last refresh, and the timer that
+        #: batches them (a burst of saves costs one refresh, not one each).
+        self.refresh_delay = refresh_delay
+        self._changed: set = set()
+        self._timer: Optional[threading.Timer] = None
+        self._pending = threading.Lock()
 
     @classmethod
     def from_settings(cls, settings, calibration_store, phoneme_service, feedback_examples=None,
@@ -220,6 +234,72 @@ class ProfileTrainer:
                 log.exception("could not build the sound bank")
             log.info("sound profile v%s built from %s", profile.version, profile.sources)
             return profile
+
+    # -- after a calibration take is saved or deleted ----------------------------
+
+    def take_changed(self, cache_id: str) -> None:
+        """A take was (re)recognized or deleted: refresh the profile and bank soon.
+
+        Runs on a timer thread, never on the phoneme model's worker, so Talk
+        recognitions are not queued behind it; takes that change within
+        ``refresh_delay`` of each other are handled in one refresh.
+        """
+        with self._pending:
+            self._changed.add(cache_id)
+            if self._timer is not None:
+                self._timer.cancel()
+            self._timer = threading.Timer(self.refresh_delay, self.flush)
+            self._timer.daemon = True
+            self._timer.name = "profile-refresh"
+            self._timer.start()
+
+    def flush(self) -> Optional[SoundProfile]:
+        """Apply the pending take changes now (the timer calls this; tests may too)."""
+        with self._pending:
+            changed, self._changed = self._changed, set()
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+        if not changed:
+            return None
+        try:
+            return self._refresh(changed)
+        except Exception:
+            log.exception("could not refresh the sound profile")
+            return None
+
+    def _refresh(self, changed: set) -> Optional[SoundProfile]:
+        with self._lock:
+            examples = self.examples()
+            if not examples:
+                return None
+            profile = self._build(examples)
+            self.store.save(profile)
+            try:
+                self._update_bank(changed)
+            except Exception:  # the profile is still useful without the bank
+                log.exception("could not update the sound bank")
+            log.info("sound profile v%s built from %s (%d take(s) changed)",
+                     profile.version, profile.sources, len(changed))
+            return profile
+
+    def _update_bank(self, changed: set) -> None:
+        bank = self.sound_bank()
+        if bank is None or not bank.complete:
+            bank = build_sound_bank(self.calibration_store, self.phoneme_service)
+        else:
+            records = {take_cache_id(r["id"], int(r.get("take", 1) or 1)): r
+                       for r in self.calibration_store.list_sentences()}
+            for cache_id in sorted(changed):
+                found = (take_segments(records[cache_id], self.calibration_store, self.phoneme_service)
+                         if cache_id in records else None)
+                if found is None:
+                    bank = bank.update(cache_id)            # deleted, or not recognized yet
+                else:
+                    _, audio, sr, segments = found
+                    bank = bank.update(cache_id, audio, sr, segments)
+        bank.save(self.bank_dir)
+        self._bank = bank
 
     def sound_bank(self) -> Optional[SoundBank]:
         if self._bank is None:
@@ -289,15 +369,10 @@ class ProfileTrainer:
             after = self.evaluate(candidate, holdout)
             better = (before is None or after is None
                       or (after["top3"], after["top1"]) >= (before["top3"], before["top1"]))
+            # The sound bank comes from calibration takes only, so feedback
+            # never changes it: no need to rebuild it here.
             with self._lock:
                 saved = self.store.save(candidate, activate=better)
-            if better:
-                try:
-                    bank = build_sound_bank(self.calibration_store, self.phoneme_service)
-                    bank.save(self.bank_dir)
-                    self._bank = bank
-                except Exception:
-                    log.exception("could not rebuild the sound bank")
             entry = {"at": saved.created_at, "trigger": trigger, "candidate_version": saved.version,
                      "promoted": better, "current_version": self.store.current_version(),
                      "holdout": len(holdout), "before": before, "after": after,

@@ -66,12 +66,26 @@ class RecognitionService:
             log.exception('Could not read preferences; phonetic mode off for this attempt')
             return False
 
-    def _run_cascade(self, ctx: RecognitionContext) -> MatchResult:
-        ran: List[StageResult] = []
+    def _eligible(self, ctx: RecognitionContext) -> List[RecognitionStage]:
+        out = []
         for stage in self.stages:
             try:
-                if not stage.enabled(ctx) or not stage.available():
-                    continue
+                if stage.enabled(ctx) and stage.available():
+                    out.append(stage)
+            except Exception:
+                log.exception('Recognition stage %r failed its checks; skipping it', getattr(stage, 'name', stage))
+        return out
+
+    def _run_cascade(self, ctx: RecognitionContext) -> MatchResult:
+        ran: List[StageResult] = []
+        stages = self._eligible(ctx)
+        for index, stage in enumerate(stages):
+            # Start the next stage's heavy model work now, on its own thread,
+            # so it overlaps this stage instead of waiting for it. If this
+            # stage settles the answer, the head start is simply not used.
+            if index + 1 < len(stages):
+                _prefetch(stage, stages[index + 1], ctx)
+            try:
                 outcome = stage.run(ctx)
             except Exception:
                 # A missing model or a broken recognizer must never stop the
@@ -102,6 +116,22 @@ class RecognitionService:
         if stage is None:
             return "Sound learning isn't part of this server."
         return getattr(stage, 'unavailable_reason', lambda: None)() or None
+
+
+def _prefetch(current, stage, ctx: RecognitionContext) -> None:
+    prefetch = getattr(stage, 'prefetch', None)
+    if prefetch is None:
+        return
+    # Behind a stage that can confirm on its own (a saved phrase recognized
+    # outright is the common case) a head start is mostly wasted work that
+    # competes for the CPU, so only start early behind stages that never do.
+    if getattr(current, 'may_confirm', False):
+        return
+    try:
+        prefetch(ctx)
+    except Exception:
+        # The stage will simply do the work itself when it runs.
+        log.exception('Could not start stage %r early', getattr(stage, 'name', stage))
 
 
 def merge_unconfident(results: List[StageResult]) -> List[MatchCandidate]:

@@ -77,7 +77,8 @@ class PhonemeService:
     @classmethod
     def from_settings(cls, settings) -> "PhonemeService":
         recognizer = PhonemeRecognizer(cache_dir=settings.phoneme_cache_dir,
-                                       model_name=settings.PHONEME_MODEL)
+                                       model_name=settings.PHONEME_MODEL,
+                                       cpu_threads=settings.PHONEME_CPU_THREADS)
         return cls(recognizer, settings.PHONEME_MODEL, enabled=settings.PHONEMES_ENABLED)
 
     # -- availability -------------------------------------------------------

@@ -118,3 +118,60 @@ def test_profile_api(client):
     assert len(body["sounds"]) == 39 and body["sounds"][0]["example"]
     assert body["sounds"][0]["status"] == "not_yet"
     assert client.post("/api/profile/rebuild").status_code == 200
+
+
+def _tone_take(record, calibration_store, phoneme_service):
+    """Stands in for training.take_segments: three synthetic sounds per take."""
+    import numpy as np
+
+    t = np.arange(4800) / 16000
+    audio = np.concatenate([(0.3 * np.sin(2 * np.pi * f * t)).astype(np.float32) for f in (200, 800, 2000)])
+    segs = [NS(phoneme=p, start_sec=a, end_sec=a + 0.3, confidence=0.9)
+            for p, a in (("S", 0.0), ("IY", 0.3), ("T", 0.6))]
+    return take_cache_id(record["id"], record["take"]), audio, 16000, segs
+
+
+def test_take_changes_are_batched_and_the_bank_updated_in_place(tmp_path, monkeypatch):
+    from app.phonetics import training
+
+    phrase = load_enrollment_set()[0]
+    records = [{"id": phrase.id, "take": 1}, {"id": phrase.id, "take": 2}]
+    ids = [take_cache_id(phrase.id, 1), take_cache_id(phrase.id, 2)]
+    phonemes = FakePhonemes({i: list(phrase.phonemes) for i in ids})
+    monkeypatch.setattr(training, "take_segments", _tone_take)
+    trainer = ProfileTrainer(tmp_path, FakeCalibration(records), phonemes, 1.0, 2, refresh_delay=60)
+
+    for cache_id in ids:
+        trainer.take_changed(cache_id)
+    assert trainer.current() is None                     # waiting for the burst to end
+    assert trainer.flush().sources == {"take": 2}
+    assert ProfileStore(tmp_path).versions() == [1]      # two saves, one refresh
+    assert trainer.sound_bank().coverage() == {"S": 2, "IY": 2, "T": 2}
+
+    # Deleting a take updates the saved bank without rebuilding it from every take.
+    monkeypatch.setattr(training, "build_sound_bank", lambda *a: pytest.fail("full rebuild"))
+    records.pop()
+    phonemes.heard.pop(ids[1])
+    trainer.take_changed(ids[1])
+    trainer.flush()
+    trainer._bank = None                                  # read it back from disk
+    assert trainer.sound_bank().coverage() == {"S": 1, "IY": 1, "T": 1}
+    assert trainer.flush() is None                        # nothing pending
+
+
+def test_take_changes_refresh_on_their_own(tmp_path, monkeypatch):
+    import time
+
+    from app.phonetics import training
+
+    phrase = load_enrollment_set()[0]
+    cache_id = take_cache_id(phrase.id, 1)
+    monkeypatch.setattr(training, "take_segments", _tone_take)
+    trainer = ProfileTrainer(tmp_path, FakeCalibration([{"id": phrase.id, "take": 1}]),
+                             FakePhonemes({cache_id: list(phrase.phonemes)}), 1.0, 2, refresh_delay=0.05)
+    trainer.take_changed(cache_id)
+    for _ in range(100):
+        if trainer.current() is not None:
+            break
+        time.sleep(0.02)
+    assert trainer.current().sources == {"take": 1}

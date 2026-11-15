@@ -96,8 +96,46 @@ def test_bank_save_load_and_remove(tmp_path):
     assert SoundBank.load(tmp_path / "missing") is None
 
 
-def test_finalize_caps_units():
-    bank = SoundBank({"S": [Unit("S", f"t{i}", np.random.default_rng(i).normal(size=(5, 39)).astype(np.float32))
-                            for i in range(9)]})
+def test_finalize_keeps_every_unit_most_typical_first():
+    rng = np.random.default_rng(0)
+    centre = rng.normal(size=(5, 39)).astype(np.float32)
+    units = [Unit("S", f"t{i}", centre + rng.normal(scale=0.1 + i, size=(5, 39)).astype(np.float32))
+             for i in range(6)]
+    bank = SoundBank({"S": list(reversed(units))})
     bank.finalize()
-    assert len(bank.units["S"]) == 5
+    assert len(bank.units["S"]) == 6
+    assert bank.units["S"][0].source == "t0"            # the one closest to all the others
+
+
+def test_update_swaps_one_take_and_matches_a_full_rebuild():
+    audio = np.concatenate([tone(200), tone(800), tone(2000)])
+    segs = [Seg("S", 0.0, 0.3), Seg("IY", 0.3, 0.6), Seg("T", 0.6, 0.9)]
+    other = np.concatenate([tone(300), tone(900), tone(2100)])
+    full = SoundBank()
+    for source, take in (("a", audio), ("b", other), ("c", audio)):
+        full.add_take(source, take, 16000, segs)
+    full.finalize()
+
+    bank = SoundBank()
+    bank.add_take("a", audio, 16000, segs)
+    bank.add_take("b", audio, 16000, segs)               # will be re-recorded
+    bank.finalize()
+    updated = bank.update("b", other, 16000, segs).update("c", audio, 16000, segs)
+    assert bank.coverage() == {"S": 2, "IY": 2, "T": 2}  # the original is left alone
+    assert updated.coverage() == full.coverage()
+    for phoneme in full.units:
+        assert sorted(u.source for u in updated.units[phoneme]) == sorted(u.source for u in full.units[phoneme])
+        assert updated.units[phoneme][0].source == full.units[phoneme][0].source
+    assert updated.update("c").coverage() == {"S": 2, "IY": 2, "T": 2}     # deleted take
+
+
+def test_an_old_capped_bank_is_marked_incomplete(tmp_path):
+    import json
+
+    bank, _ = bank_from_tones()
+    bank.save(tmp_path)
+    assert SoundBank.load(tmp_path).complete is True
+    index = json.loads((tmp_path / "index.json").read_text())
+    (tmp_path / "index.json").write_text(json.dumps(index["units"]))   # the format-1 layout
+    old = SoundBank.load(tmp_path)
+    assert old.complete is False and old.coverage() == bank.coverage()

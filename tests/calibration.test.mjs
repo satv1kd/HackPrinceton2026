@@ -99,7 +99,7 @@ test('recording starts on the button and ends on "I\'ve read it"', async () => {
   await recording;
   assert.deepEqual(saves.map(s => [s.id, s.text]), [['s01', PASSAGE[0].text]]);
   assert.equal(flow.state, 'saved');
-  assert.match($('rec-label').textContent, /all 7 words lined up/);
+  assert.equal($('rec-label').textContent, 'Saved.');
   assert.equal($('rec-dot').hidden, true);
 });
 
@@ -160,15 +160,15 @@ test('pausing cancels the take and offers Resume', async () => {
   assert.equal(saves.length, 0);
 });
 
-test('the finish screen counts sentences and the words that were cut', async () => {
+test('the finish screen counts the sentences recorded', async () => {
   flow.saved.set('s01', record('s01', 7, 7));
   flow.saved.set('s02', record('s02', 4, 7));
   flow.buildFinish();
   assert.equal($('screen-finish').hidden, false);
-  assert.match($('finish-summary').textContent, /2 of 2 sentences recorded, 11 of 14 words/);
+  assert.equal($('finish-summary').textContent, '2 of 2 sentences recorded.');
   const rows = $('finish-list').querySelectorAll('li');
   assert.equal(rows.length, 2);
-  assert.match(rows[1].textContent, /4 of 7 words/);
+  assert.match(rows[1].textContent, /Recorded · 2\.0s/);
   // Play and Re-record on a recorded sentence; Record on one that has none.
   assert.deepEqual([...rows[0].querySelectorAll('button')].map(b => b.textContent),
     ['Play', 'Re-record']);
@@ -191,11 +191,10 @@ test('re-recording one sentence from the finish list returns to the finish list'
   assert.equal($('screen-finish').hidden, false);
 });
 
-test('what the reader is told never blames them', () => {
-  assert.equal(savedMessage({ placed_count: 7, word_count: 7 }), 'Saved — all 7 words lined up.');
-  assert.equal(savedMessage({ placed_count: 3, word_count: 7 }), 'Saved — 3 of 7 words lined up.');
-  assert.match(savedMessage({ placed_count: 0, word_count: 7 }), /recording is still kept/);
-  assert.equal(savedMessage({ placed_count: 0, word_count: 0 }), 'Saved.');
+test('what the reader is told never grades the take', () => {
+  for (const record of [{ placed_count: 7, word_count: 7 }, { placed_count: 0, word_count: 7 }, undefined]) {
+    assert.equal(savedMessage(record), 'Saved.');
+  }
 });
 
 test('the upload is named for what the browser actually recorded', () => {
@@ -264,9 +263,9 @@ test('the finish list counts takes, and re-recording does both takes then return
   f.saved.set('s01#2', { ...record('s01', 6, 7), take: 2 });
   f.saved.set('s02', { ...record('s02', 7, 7), take: 1 });
   f.buildFinish();
-  assert.match($('finish-summary').textContent, /1 of 2 phrases recorded twice; 20 of 28 words/);
+  assert.equal($('finish-summary').textContent, '1 of 2 phrases recorded twice.');
   const rows = $('finish-list').querySelectorAll('li');
-  assert.match(rows[0].textContent, /2 of 2 takes · 13 words cut/);
+  assert.match(rows[0].textContent, /2 of 2 takes/);
   assert.match(rows[1].textContent, /1 of 2 takes/);
   rows[1].querySelector('button:last-of-type').click();      // Re-record
   assert.equal($('read-count').textContent, 'Phrase 2 of 2 · take 1 of 2');

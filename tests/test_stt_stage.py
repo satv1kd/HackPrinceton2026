@@ -55,6 +55,19 @@ def test_transcript_matching_a_phrase_is_subbed_in():
     assert c.extras["transcript"] == "I want water."
 
 
+def test_a_head_start_transcribes_once_on_its_own_thread():
+    import threading
+
+    s, c = stage("I want water.", ("w", "I want water")), ctx()
+    threads = []
+    real = s.backend.transcribe
+    s.backend.transcribe = lambda *a, **k: (threads.append(threading.current_thread().name), real(*a, **k))[1]
+    s.prefetch(c)
+    out = s.run(c)
+    assert s.backend.calls == 1 and threads[0].startswith("stt")
+    assert out.candidates[0].phrase_id == "w" and not c.prefetched
+
+
 def test_close_match_keeps_transcript_as_alternative():
     out = stage("I want a water", ("w", "I want water")).run(ctx())
     assert [(x.type, x.text) for x in out.candidates] == [("phrase", "I want water"), ("generated", "I want a water")]

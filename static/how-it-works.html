@@ -109,7 +109,7 @@
         <li><span>Transcription</span><span>Whisper (base.en via faster-whisper) on the local CPU, nudged toward your saved phrases; silence and Whisper’s stock hallucinations are filtered out.</span></li>
         <li><span>Matching</span><span>MFCC features compared with dynamic time warping against your sample recordings; confidence needs a clear margin before anything is called certain.</span></li>
         <li><span>Speaking</span><span>A natural synthesized voice when a key is configured, with the browser’s built-in voice as the fallback.</span></li>
-        <li><span>Calibration</span><span>Each sentence is recorded whole, then cut into per-word clips on the server from Whisper’s word timestamps; every clip keeps the word that was asked for alongside what was heard.</span></li>
+        <li><span>Calibration</span><span>Each phrase is recorded whole, twice, and saved as it is — you read the words on screen, so nothing is transcribed. In the background the phoneme model lines each take up against the phrase’s sounds, which is what the sound profile learns from.</span></li>
         <li><span>Storage</span><span>JSON and audio files on disk, on the computer running Heard — for the app and for calibration recordings alike. No cloud storage, no account.</span></li>
         <li><span>Sound learning</span><span>A per-person phonetic profile (how each of your sounds comes out) learned from calibration and everyday yes/no taps; a phoneme model (wav2vec2) plus a decoder over 5,000 common words. Optional, off by default; it updates itself only when an update helps.</span></li>
       </ul>

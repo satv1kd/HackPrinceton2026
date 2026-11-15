@@ -15,7 +15,6 @@
    Nothing here can tell the reader they were wrong. The worst outcome is "we
    couldn't line every word up", which is a fact about our cutting, not them. */
 
-const wordsOf = sentence => sentence.text.split(/\s+/).filter(Boolean);
 
 /* A phrase is recorded `takes` times. Each take is its own card; take 1 keeps
    the bare phrase id as its key (as the server does), later takes add "#n". */
@@ -299,15 +298,11 @@ export class CalibrationFlow {
     this.show('screen-finish');
     this.renderDots();
     const recorded = this.passage.filter(p => this.takesDone(p) > 0).length;
-    const placed = [...this.saved.values()].reduce((sum, r) => sum + (r.placed_count || 0), 0);
-    const words = this.passage.reduce((sum, s) => sum + wordsOf(s).length, 0) * this.takes;
     const noun = this.takes === 1 ? 'sentences' : 'phrases';
     const complete = this.passage.filter(p => this.takesDone(p) === this.takes).length;
     this.$('finish-summary').textContent = this.takes === 1
-      ? `${recorded} of ${this.passage.length} ${noun} recorded` +
-        (recorded ? `, ${placed} of ${words} words cut into their own clips.` : '.')
-      : `${complete} of ${this.passage.length} ${noun} recorded twice` +
-        (recorded ? `; ${placed} of ${words} words cut into their own clips.` : '.');
+      ? `${recorded} of ${this.passage.length} ${noun} recorded.`
+      : `${complete} of ${this.passage.length} ${noun} recorded twice.`;
     const list = this.$('finish-list');
     list.innerHTML = '';
     this.passage.forEach((sentence, index) => {
@@ -326,12 +321,11 @@ export class CalibrationFlow {
     meta.className = 'fmeta';
     if (record && this.takes === 1) {
       meta.classList.add('recorded');
-      meta.textContent = `${record.placed_count} of ${record.word_count} words · ${(record.duration_sec || 0).toFixed(1)}s`;
+      meta.textContent = `Recorded · ${(record.duration_sec || 0).toFixed(1)}s`;
     } else if (record) {
       const done = takes.filter(Boolean).length;
       meta.classList.add('recorded');
-      meta.textContent = `${done} of ${this.takes} takes · ` +
-        `${takes.reduce((n, r) => n + (r?.placed_count || 0), 0)} words cut`;
+      meta.textContent = `${done} of ${this.takes} takes`;
     } else {
       meta.textContent = 'Not recorded';
     }
@@ -406,14 +400,8 @@ export class CalibrationFlow {
   }
 }
 
-export function savedMessage(record) {
-  const placed = record?.placed_count ?? 0;
-  const total = record?.word_count ?? 0;
-  if (!total) return 'Saved.';
-  if (placed === total) return `Saved — all ${total} words lined up.`;
-  if (placed === 0) {
-    // The take is kept either way; say so, and don't imply they misread it.
-    return 'Saved. We couldn’t line the words up this time — the recording is still kept.';
-  }
-  return `Saved — ${placed} of ${total} words lined up.`;
+/* Nothing about the take is judged, so there is nothing to report but that
+   it is kept; the sound engine learns from it in the background. */
+export function savedMessage() {
+  return 'Saved.';
 }

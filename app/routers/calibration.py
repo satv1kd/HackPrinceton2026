@@ -1,9 +1,15 @@
-"""Calibration endpoints: a sentence is recorded whole, then cut into words.
+"""Calibration endpoints: each phrase is recorded whole, two takes each.
 
-The page uploads one sentence at a time. The server cleans the audio, asks
-speech-to-text for word timings, slices a clip per word and keeps the lot next
-to the words the passage asked for. Nothing is judged and nothing is scored;
-the response just says how much of the sentence could be placed in time.
+The page uploads one take at a time. The server cleans the audio, keeps it
+(also as a sample of the matching Talk phrase) and answers straight away.
+The person was reading the phrase on screen, so there is nothing to
+transcribe: the sound engine lines the take up against the phrase's known
+pronunciation in the background (phoneme model + forced alignment), and
+that is where the per-sound timing comes from. Nothing is judged and
+nothing is scored.
+
+Older takes may still carry per-word clips from when speech-to-text cut
+them; ``/words/{index}`` keeps serving those.
 """
 
 from typing import Annotated, List, Optional
@@ -11,21 +17,20 @@ from typing import Annotated, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.deps import (get_calibration_preprocessor, get_calibration_store, get_feature_cache,
-                      get_phoneme_service, get_profile_trainer, get_store, get_stt_backend)
+                      get_phoneme_service, get_profile_trainer, get_store)
 from app.phonetics.service import PhonemeService, take_cache_id
 from app.phonetics.enrollment import TAKES_PER_PHRASE, enrollment_phrase, load_enrollment_set
 from app.services.audio import AudioPreprocessor, AudioProcessingError, AudioTooShortError
 from app.services.calibration import MAX_TAKES, CalibrationStore
 from app.services.enrollment import EnrollmentLinker
-from app.stt import SpeechToTextError
 
 router = APIRouter(prefix="/api/calibration", tags=["calibration"])
 
 Store = Annotated[CalibrationStore, Depends(get_calibration_store)]
 Preprocessor = Annotated[AudioPreprocessor, Depends(get_calibration_preprocessor)]
-Backend = Annotated[object, Depends(get_stt_backend)]
 
 
 def get_linker() -> EnrollmentLinker:
@@ -113,41 +118,37 @@ def enrollment_set(store: Store):
 
 
 @router.post("/sentences", response_model=SentenceOut)
-async def save_sentence(store: Store, preprocessor: Preprocessor, backend: Backend, linker: Linker,
+async def save_sentence(store: Store, preprocessor: Preprocessor, linker: Linker,
                         phonemes: Phonemes, trainer: Trainer,
                         sentence_id: Annotated[str, Form(min_length=1, max_length=40)],
                         text: Annotated[str, Form(min_length=1, max_length=400)],
                         take: Annotated[int, Form(ge=1, le=MAX_TAKES)] = 1,
                         audio: UploadFile = File(...)):
-    phrase = enrollment_phrase(sentence_id)
-    if phrase is not None:
-        text = phrase.text  # the server's copy is authoritative for enrollment phrases
     raw = await audio.read()
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Recording too large")
+    # ffmpeg, disk writes and features are blocking work: run them on a worker
+    # thread so one save never stalls every other request.
+    return await run_in_threadpool(_save_take, store, preprocessor, linker, phonemes, trainer,
+                                   sentence_id, text, take, raw, audio.content_type)
+
+
+def _save_take(store, preprocessor, linker, phonemes, trainer, sentence_id: str, text: str,
+               take: int, raw: bytes, content_type: Optional[str]) -> SentenceOut:
+    phrase = enrollment_phrase(sentence_id)
+    if phrase is not None:
+        text = phrase.text  # the server's copy is authoritative for enrollment phrases
     try:
-        wav = preprocessor.convert_to_wav(raw, audio.content_type)
+        wav = preprocessor.convert_to_wav(raw, content_type)
         processed = preprocessor.clean(wav)
     except AudioTooShortError as error:
         raise HTTPException(422, str(error)) from error
     except AudioProcessingError as error:
         raise HTTPException(400, str(error)) from error
 
-    transcript_text, words = "", []
-    if backend.is_available():
-        try:
-            transcript = backend.transcribe(processed.samples, processed.sr, vocabulary=[text])
-            transcript_text, words = transcript.text, transcript.words
-        except SpeechToTextError as error:
-            # A sentence read aloud is worth keeping even when the cutting
-            # step cannot run; the words simply stay unplaced.
-            transcript_text, words = "", []
-            _log_unavailable(error)
-
     try:
         previous = store.get_sentence(sentence_id, take)
-        record = store.save_sentence(sentence_id, text, processed.samples, processed.sr,
-                                     transcript=transcript_text, heard=words, take=take)
+        record = store.save_sentence(sentence_id, text, processed.samples, processed.sr, take=take)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     result = record.to_json()
@@ -159,12 +160,13 @@ async def save_sentence(store: Store, preprocessor: Preprocessor, backend: Backe
             previous_sample_id=(previous or {}).get("sample_id"))
         result = store.update_record(record.id, take, phrase_id=phrase_id, sample_id=sample_id) or result
     # The sound profile needs to know which phonemes the model heard in this
-    # take; work it out in the background so the page is not kept waiting.
+    # take; work it out in the background so the page is not kept waiting,
+    # then fold it into the profile and sound bank (batched, also background).
     take_path = store.resolve(result.get("audio_path") or "")
     if take_path is not None:
-        # ...and rebuild the profile once it knows (cheap: a few dozen alignments).
-        phonemes.recognize_file_async(take_path, take_cache_id(record.id, take),
-                                      on_done=lambda _result: trainer.rebuild())
+        cache_id = take_cache_id(record.id, take)
+        phonemes.recognize_file_async(take_path, cache_id,
+                                      on_done=lambda _result: trainer.take_changed(cache_id))
     return _out(result)
 
 
@@ -203,14 +205,9 @@ def delete_sentence(sentence_id: str, store: Store, linker: Linker, phonemes: Ph
     if not deleted:
         raise HTTPException(404, "No recording for that sentence")
     for record in deleted:
-        phonemes.forget(take_cache_id(record["id"], int(record.get("take", 1) or 1)))
+        cache_id = take_cache_id(record["id"], int(record.get("take", 1) or 1))
+        phonemes.forget(cache_id)
         if record.get("phrase_id") and record.get("sample_id"):
             linker.remove_sample(record["phrase_id"], record["sample_id"])
-    if phonemes.available():
-        trainer.rebuild()
-
-
-def _log_unavailable(error: Exception) -> None:
-    import logging
-
-    logging.getLogger(__name__).warning("calibration could not transcribe: %s", error)
+        if phonemes.available():
+            trainer.take_changed(cache_id)

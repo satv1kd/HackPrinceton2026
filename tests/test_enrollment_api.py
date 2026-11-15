@@ -1,42 +1,21 @@
 """Task 24: enrollment phrases on the calibration page, two takes each,
 saved as Talk phrases."""
 
-from types import SimpleNamespace as NS
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.phonetics.enrollment import TAKES_PER_PHRASE, load_enrollment_set
-from app.stt import Transcript
 from tests.conftest import tone, wav_bytes
 
 PHRASE = load_enrollment_set()[0]
 
 
-class FakeBackend:
-    def __init__(self, text):
-        self.text = text
-
-    def is_available(self):
-        return True
-
-    def transcribe(self, audio, sr, vocabulary=None):
-        words = [NS(text=w, start=i * 0.3, end=i * 0.3 + 0.25, probability=0.9)
-                 for i, w in enumerate(self.text.split())]
-        return Transcript(text=self.text, words=words, avg_logprob=-0.2, no_speech_prob=0.01)
-
-
 @pytest.fixture
 def client(data_dir):
-    from app.deps import get_stt_backend
     from app.main import app
 
-    app.dependency_overrides[get_stt_backend] = lambda: FakeBackend(PHRASE.text)
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        app.dependency_overrides.pop(get_stt_backend, None)
+    with TestClient(app) as c:
+        yield c
 
 
 def upload(client, take=1, text="anything the page says", phrase_id=PHRASE.id, seconds=1.5):
@@ -125,3 +104,15 @@ def test_free_text_sentences_still_work_without_a_talk_phrase(client):
 def test_bad_take_numbers_are_rejected(client):
     assert upload(client, take=0).status_code == 422
     assert upload(client, take=9).status_code == 422
+
+
+def test_a_saved_take_is_handed_to_the_sound_engine(client, monkeypatch):
+    from app.deps import get_phoneme_service, get_profile_trainer
+
+    queued, changed = [], []
+    service = get_phoneme_service()
+    monkeypatch.setattr(service, "recognize_file_async",
+                        lambda path, cache_id, on_done=None: (queued.append(cache_id), on_done(None)))
+    monkeypatch.setattr(get_profile_trainer(), "take_changed", changed.append)
+    assert upload(client, take=2).status_code == 200
+    assert queued == changed == [f"cal-{PHRASE.id}-t2"]
