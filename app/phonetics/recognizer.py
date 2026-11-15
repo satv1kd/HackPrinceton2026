@@ -248,6 +248,8 @@ class PhonemeRecognition:
     posteriors: Optional[np.ndarray] = field(default=None, repr=False)
     posterior_labels: Optional[List[str]] = field(default=None, repr=False)
     from_cache: bool = False
+    #: Recognizer symbols with no English approximation (reported, not used).
+    dropped: List[str] = field(default_factory=list)
 
     @property
     def real_time_factor(self) -> Optional[float]:
@@ -267,6 +269,7 @@ class PhonemeRecognition:
             "frame_rate_hz": self.frame_rate_hz,
             "posterior_labels": self.posterior_labels,
             "has_posteriors": self.posteriors is not None,
+            "dropped": self.dropped,
         }
 
 
@@ -350,12 +353,12 @@ class PhonemeRecognizer:
         result = self.backend.transcribe(samples, sample_rate)
         inference_sec = time.perf_counter() - started
 
-        # A symbol with no mapping is an error, not something to drop: see the
-        # module docstring of app.phonetics.mapping.
-        raw_phonemes = mapping.tokenize_espeak(result.raw_text)
-        phonemes: List[str] = []
-        for symbol in raw_phonemes:
-            phonemes.extend(mapping.ESPEAK_TO_CANONICAL[symbol])
+        # The model is multilingual; non-English symbols map to the nearest
+        # English phone and anything unmappable is reported, never silently
+        # lost (see the lenient section of app.phonetics.mapping).
+        phonemes, raw_phonemes, dropped = mapping.espeak_to_canonical_lenient(result.raw_text)
+        if dropped:
+            logger.warning("phoneme recognizer emitted unmappable symbols %s", dropped)
         inventory.validate_sequence(phonemes)
 
         recognition = PhonemeRecognition(
@@ -367,6 +370,7 @@ class PhonemeRecognizer:
             frame_rate_hz=result.frame_rate_hz,
             posteriors=result.posteriors if want_posteriors else None,
             posterior_labels=result.posterior_labels if want_posteriors else None,
+            dropped=dropped,
         )
 
         if cache_id:
@@ -422,6 +426,7 @@ class PhonemeRecognizer:
             posteriors=posteriors,
             posterior_labels=metadata.get("posterior_labels"),
             from_cache=True,
+            dropped=list(metadata.get("dropped", [])),
         )
 
     def _store(self, cache_id: str, recognition: PhonemeRecognition) -> None:

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.deps import get_phoneme_service, get_store, get_stt_backend
-from app.routers import calibration, health, phrases, preferences, send, tts
+from app.routers import profile, calibration, health, phrases, preferences, send, tts
 from app.services.health import HealthChecker
 from app.services.tts import TTSService
 from app.task_integration import foundation_services, install_tasks_5_8
@@ -52,6 +52,7 @@ app.include_router(send.router)
 app.include_router(health.router)
 app.include_router(preferences.router)
 app.include_router(calibration.router)
+app.include_router(profile.router)
 install_tasks_5_8(app, services_factory=foundation_services)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

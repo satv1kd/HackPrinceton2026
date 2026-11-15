@@ -55,11 +55,19 @@ def get_phoneme_service() -> PhonemeService:
 
 
 @lru_cache
+def get_profile_trainer():
+    from app.phonetics.training import ProfileTrainer
+
+    return ProfileTrainer.from_settings(get_settings(), get_calibration_store(), get_phoneme_service())
+
+
+@lru_cache
 def get_phonetic_readiness() -> PhoneticReadiness:
     # Checked in order; the first unmet one is the reason shown by the switch.
     from app.services.preferences import _engine_not_built
 
-    return PhoneticReadiness([get_phoneme_service().unavailable_reason, _engine_not_built])
+    return PhoneticReadiness([get_phoneme_service().unavailable_reason,
+                              get_profile_trainer().readiness, _engine_not_built])
 
 
 @lru_cache
@@ -72,7 +80,7 @@ def reset_caches() -> None:
     """Forget all singletons (used by tests that change settings)."""
     for fn in (get_settings, get_store, get_preprocessor, get_feature_cache,
                get_preference_store, get_phonetic_readiness, get_stt_backend,
-               get_calibration_preprocessor, get_calibration_store):
+               get_calibration_preprocessor, get_calibration_store, get_profile_trainer):
         fn.cache_clear()
     if get_phoneme_service.cache_info().currsize:
         get_phoneme_service().shutdown()
