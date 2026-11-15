@@ -35,7 +35,7 @@ from typing import List, Optional, Protocol, Sequence
 
 import numpy as np
 
-from app import settings_bridge
+from app.config import get_settings
 from app.phonetics import inventory, mapping
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ class Wav2Vec2PhonemeBackend:
         try:
             # local_files_only keeps the demo off the network, per the PRD's
             # requirement that weights be pre-downloaded.
-            offline = settings_bridge.get_bool("PHONEME_MODEL_OFFLINE", False)
+            offline = get_settings().PHONEME_MODEL_OFFLINE
             self._processor = AutoProcessor.from_pretrained(
                 self.name, local_files_only=offline
             )
@@ -288,11 +288,9 @@ class PhonemeRecognizer:
         cache_dir=None,
         model_name: Optional[str] = None,
     ):
-        self.model_name = model_name or settings_bridge.get("PHONEME_MODEL", DEFAULT_MODEL)
+        self.model_name = model_name or get_settings().PHONEME_MODEL
         self.backend = backend if backend is not None else Wav2Vec2PhonemeBackend(self.model_name)
-        self.cache_dir = Path(cache_dir) if cache_dir else Path(
-            settings_bridge.get("PHONEME_CACHE_DIR", "data/phonemes")
-        )
+        self.cache_dir = Path(cache_dir) if cache_dir else get_settings().phoneme_cache_dir
 
     # -- cache paths -------------------------------------------------------
 

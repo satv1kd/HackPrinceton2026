@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,6 +33,39 @@ class Settings(BaseSettings):
     TRIM_TOP_DB: float = 20
     MIN_CLIP_SEC: float = 0.3
     MAX_CLIP_SEC: float = 10.0
+
+    # --- Phonetic engine (PRD F6). Numeric defaults are starting points; the
+    # evaluation task (34) replaces them with measured values.
+    PHONEME_MODEL: str = "facebook/wav2vec2-lv-60-espeak-cv-ft"
+    PHONEME_MODEL_OFFLINE: bool = False
+    PHONEME_CACHE_DIR: Optional[Path] = None  # None means DATA_DIR / "phonemes"
+    MIN_PHONEME_OCCURRENCES: int = 2
+    LEXICON_SIZE: int = 5000
+    MAX_DECODE_WORDS: int = 6
+    PROFILE_SMOOTHING_ALPHA: float = 1.0
+    LM_WEIGHT: float = 0.3
+    RETRAIN_MIN_NEW_EXAMPLES: int = 10
+    HOLDOUT_FRACTION: float = 0.2
+    # Initial value of the user-facing "phonetic mode" switch; the live value
+    # is stored in DATA_DIR/preferences.json once the user changes it.
+    PHONETIC_MODE_DEFAULT: bool = False
+
+    # --- Default speech-to-text (local faster-whisper), the fallback when no
+    # saved phrase matches.
+    STT_ENABLED: bool = True
+    STT_MODEL_SIZE: str = "base.en"
+    STT_DEVICE: str = "cpu"
+    STT_COMPUTE_TYPE: str = "int8"
+    # Never download the model at request time (pre-fetch it before a demo).
+    STT_OFFLINE: bool = False
+    # rapidfuzz score (0-100) at which a transcript counts as a saved phrase.
+    STT_PHRASE_MATCH_MIN: float = 85.0
+    # Segments faster-whisper marks as more likely silence than speech.
+    STT_NO_SPEECH_MAX: float = 0.6
+
+    @property
+    def phoneme_cache_dir(self) -> Path:
+        return self.PHONEME_CACHE_DIR or self.DATA_DIR / "phonemes"
 
 
 @lru_cache
