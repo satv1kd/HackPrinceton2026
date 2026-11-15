@@ -80,15 +80,17 @@
       <h2>4 · The calibration reading</h2>
       <p>
         <a href="/calibrate">Calibration</a> asks you to read ten short
-        sentences that together contain every sound of English. While you
-        read, the words on screen fill in at your pace — tracked by speech
-        recognition when it cooperates, by the sound of your voice when it
-        doesn’t, and by a tap or an arrow key whenever you want. It never
-        marks you wrong, because you can’t be: it’s your voice.
+        sentences that together contain every sound of English. Each one is
+        shown in full: press “Start recording”, say it in your own way and at
+        your own pace, then “I’ve read it”. Nothing follows along word by word
+        or checks whether you got a word “right” — it never marks you wrong,
+        because you can’t be: it’s your voice. Afterwards the server cuts the
+        take into one clip per word, using the speech recognizer’s timings.
       </p>
       <p>
-        <strong>Honestly:</strong> today those recordings are stored on your
-        device and nothing more. They’re the raw material for the next step —
+        <strong>Honestly:</strong> today those recordings are stored by Heard
+        on the computer it runs on, as per-word clips, and nothing more. They’re
+        the raw material for the next step —
         learning how <em>you</em> produce each sound, so Heard can understand
         words you never recorded. That part is being built; it is not live.
       </p>
@@ -104,9 +106,9 @@
       <ul class="under-the-hood">
         <li><span>Transcription</span><span>Whisper (base.en via faster-whisper) on the local CPU, nudged toward your saved phrases; silence and Whisper’s stock hallucinations are filtered out.</span></li>
         <li><span>Matching</span><span>MFCC features compared with dynamic time warping against your sample recordings; confidence needs a clear margin before anything is called certain.</span></li>
-        <li><span>Reading tracker</span><span>Browser speech recognition, fuzzily aligned and forward-only; a voice-activity fallback paced by syllables; manual control that always wins.</span></li>
         <li><span>Speaking</span><span>A natural synthesized voice when a key is configured, with the browser’s built-in voice as the fallback.</span></li>
-        <li><span>Storage</span><span>JSON and audio files on disk for the app; IndexedDB in your browser for calibration recordings.</span></li>
+        <li><span>Calibration</span><span>Each sentence is recorded whole, then cut into per-word clips on the server from Whisper’s word timestamps; every clip keeps the word that was asked for alongside what was heard.</span></li>
+        <li><span>Storage</span><span>JSON and audio files on disk, on the computer running Heard — for the app and for calibration recordings alike. No cloud storage, no account.</span></li>
         <li><span>Planned</span><span>A per-person phonetic profile learned from calibration and everyday yes/no taps. In progress, not shipped.</span></li>
       </ul>
 
