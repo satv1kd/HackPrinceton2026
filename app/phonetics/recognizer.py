@@ -128,9 +128,13 @@ class Wav2Vec2PhonemeBackend:
     constructing this object is free and importing the module is free.
     """
 
-    def __init__(self, model_name: str = DEFAULT_MODEL, device: Optional[str] = None):
+    def __init__(self, model_name: str = DEFAULT_MODEL, device: Optional[str] = None,
+                 cpu_threads: Optional[int] = None):
         self.name = model_name
         self._requested_device = device
+        #: torch's intra-op threads when running on the CPU. Capped so the
+        #: model shares the machine with speech-to-text and the server.
+        self.cpu_threads = cpu_threads
         self._model = None
         self._processor = None
         self._device = None
@@ -173,6 +177,8 @@ class Wav2Vec2PhonemeBackend:
             ) from error
 
         self._device = self._requested_device or self._pick_device(torch)
+        if self._device == "cpu" and self.cpu_threads:
+            torch.set_num_threads(int(self.cpu_threads))
         self._model = self._model.to(self._device)
         self._model.eval()
         logger.info("loaded phoneme model %s on %s", self.name, self._device)
@@ -248,6 +254,8 @@ class PhonemeRecognition:
     posteriors: Optional[np.ndarray] = field(default=None, repr=False)
     posterior_labels: Optional[List[str]] = field(default=None, repr=False)
     from_cache: bool = False
+    #: Recognizer symbols with no English approximation (reported, not used).
+    dropped: List[str] = field(default_factory=list)
 
     @property
     def real_time_factor(self) -> Optional[float]:
@@ -267,6 +275,7 @@ class PhonemeRecognition:
             "frame_rate_hz": self.frame_rate_hz,
             "posterior_labels": self.posterior_labels,
             "has_posteriors": self.posteriors is not None,
+            "dropped": self.dropped,
         }
 
 
@@ -287,9 +296,11 @@ class PhonemeRecognizer:
         backend: Optional[PhonemeBackend] = None,
         cache_dir=None,
         model_name: Optional[str] = None,
+        cpu_threads: Optional[int] = None,
     ):
         self.model_name = model_name or get_settings().PHONEME_MODEL
-        self.backend = backend if backend is not None else Wav2Vec2PhonemeBackend(self.model_name)
+        self.backend = backend if backend is not None else Wav2Vec2PhonemeBackend(
+            self.model_name, cpu_threads=cpu_threads)
         self.cache_dir = Path(cache_dir) if cache_dir else get_settings().phoneme_cache_dir
 
     # -- cache paths -------------------------------------------------------
@@ -330,18 +341,32 @@ class PhonemeRecognizer:
                 return cached
 
         samples, sample_rate = read_pcm_wav(wav_path)
+        return self.recognize_samples(samples, sample_rate, cache_id=cache_id,
+                                      want_posteriors=want_posteriors)
+
+    def recognize_samples(
+        self,
+        samples: np.ndarray,
+        sample_rate: int,
+        cache_id: Optional[str] = None,
+        want_posteriors: bool = True,
+    ) -> PhonemeRecognition:
+        """Recognize audio already in memory (16 kHz mono float32), caching by *cache_id*."""
+        if sample_rate != REQUIRED_SAMPLE_RATE:
+            raise PhonemeRecognizerError(f"audio must be {REQUIRED_SAMPLE_RATE} Hz, got {sample_rate}")
+        samples = np.asarray(samples, dtype=np.float32)
         duration = len(samples) / sample_rate
 
         started = time.perf_counter()
         result = self.backend.transcribe(samples, sample_rate)
         inference_sec = time.perf_counter() - started
 
-        # A symbol with no mapping is an error, not something to drop: see the
-        # module docstring of app.phonetics.mapping.
-        raw_phonemes = mapping.tokenize_espeak(result.raw_text)
-        phonemes: List[str] = []
-        for symbol in raw_phonemes:
-            phonemes.extend(mapping.ESPEAK_TO_CANONICAL[symbol])
+        # The model is multilingual; non-English symbols map to the nearest
+        # English phone and anything unmappable is reported, never silently
+        # lost (see the lenient section of app.phonetics.mapping).
+        phonemes, raw_phonemes, dropped = mapping.espeak_to_canonical_lenient(result.raw_text)
+        if dropped:
+            logger.warning("phoneme recognizer emitted unmappable symbols %s", dropped)
         inventory.validate_sequence(phonemes)
 
         recognition = PhonemeRecognition(
@@ -353,6 +378,7 @@ class PhonemeRecognizer:
             frame_rate_hz=result.frame_rate_hz,
             posteriors=result.posteriors if want_posteriors else None,
             posterior_labels=result.posterior_labels if want_posteriors else None,
+            dropped=dropped,
         )
 
         if cache_id:
@@ -408,6 +434,7 @@ class PhonemeRecognizer:
             posteriors=posteriors,
             posterior_labels=metadata.get("posterior_labels"),
             from_cache=True,
+            dropped=list(metadata.get("dropped", [])),
         )
 
     def _store(self, cache_id: str, recognition: PhonemeRecognition) -> None:

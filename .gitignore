@@ -41,6 +41,7 @@ data/attempts/
 data/images/
 data/tts_cache/
 data/profile/
+data/sound_bank/
 data/lexicon/
 data/calibration/
 data/contacts.json

@@ -29,7 +29,8 @@ CRITICAL = ("ffmpeg", "disk_space")
 
 
 class HealthChecker:
-    def __init__(self, settings, client_factory=None, stt_backend=None):
+    def __init__(self, settings, client_factory=None, stt_backend=None, phoneme_service=None):
+        self.phoneme_service = phoneme_service
         self.settings = settings
         #: The app's speech-to-text backend, if one was built (reports "loaded").
         self.stt_backend = stt_backend
@@ -95,7 +96,13 @@ class HealthChecker:
                 "installed": False,
                 "note": f"not installed: {', '.join(missing)} (Phase 4)",
             }
-        return {"ok": True, "installed": True, "loaded": False, "note": "Phase 4"}
+        service = self.phoneme_service
+        if service is None:
+            return {"ok": True, "installed": True, "loaded": False}
+        reason = service.unavailable_reason()
+        return {"ok": True, "installed": True, "available": reason is None,
+                "loaded": service.is_loaded, "model": service.model_name,
+                **({"note": reason} if reason else {})}
 
     def check_stt(self) -> Dict[str, Any]:
         """Speech-to-text is the fallback when no saved phrase matches.

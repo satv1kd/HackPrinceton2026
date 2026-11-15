@@ -77,6 +77,14 @@ make install-stt
 
 Then set `STT_OFFLINE=true` in `.env` so the server never downloads at runtime. Without it, Heard works as before with saved phrases only.
 
+**Optional: sound learning ("Learn from my sounds").** Learns how *you* produce each English sound from the calibration phrases and your Yes/No answers, then suggests words you never recorded. Needs torch, transformers, CMUdict and wordfreq (~1 GB) plus the wav2vec2 phoneme model (~1.2 GB, downloaded once):
+
+```bash
+make install-phonetics        # packages, the 5,000-word list, and the phoneme model
+```
+
+Then record the calibration phrases (http://localhost:8000/calibrate: 18 everyday phrases, twice each, about four minutes) and turn on **Learn from my sounds** in Setup. Setup also shows which sounds Heard has learned. Without the install, the switch explains what is missing and Heard works as before.
+
 ### 2. Configure (optional)
 
 ```bash

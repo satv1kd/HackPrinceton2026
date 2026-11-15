@@ -21,84 +21,9 @@ log = logging.getLogger(__name__)
 
 MAX_CANDIDATES = 3
 
-MAX_CANDIDATES = 3
-#: How close a transcript must be to a saved phrase's text to count as the
-#: same thing ("water please" ~ "Water, please!").
-AGREEMENT_RATIO = 0.85
-
 
 class InvalidAudio(ValueError):
     pass
-
-
-def normalize_text(text):
-    text = re.sub(r"[^a-z0-9' ]+", " ", str(text).lower().replace("’", "'"))
-    return " ".join(text.split())
-
-
-def texts_agree(a, b):
-    a, b = normalize_text(a), normalize_text(b)
-    if not a or not b:
-        return False
-    return a == b or difflib.SequenceMatcher(None, a, b).ratio() >= AGREEMENT_RATIO
-
-
-def merge_results(match, transcript, phrases, absolute_max):
-    """Combine the DTW phrase match with a Whisper transcript.
-
-    :param match: ``MatchResult`` from the DTW matcher (phrase candidates only).
-    :param transcript: ``Transcript`` or ``None`` (speech-to-text unavailable).
-    :param phrases: every saved ``Phrase`` (to find agreement beyond the top 3,
-        and to know which phrases are personal words).
-    :param absolute_max: DTW distance beyond which a phrase is not a plausible
-        alternative.
-    """
-    by_id = {p.id: p for p in phrases}
-    phrase_cands = list(match.candidates)
-    top = phrase_cands[0] if phrase_cands else None
-    top_is_personal = bool(top and by_id.get(top.phrase_id) and by_id[top.phrase_id].personal_word)
-
-    if transcript is None or not transcript.usable:
-        # No usable words. A confident personal word can still stand on its
-        # own; a confident *standard* phrase is downgraded to "unsure", so
-        # noise never gets announced as "Water please" with certainty.
-        confident = bool(match.confident and top_is_personal)
-        return MatchResult(attempt_id=match.attempt_id, confident=confident,
-                           candidates=phrase_cands[:MAX_CANDIDATES],
-                           transcript=transcript.text.strip() if transcript and transcript.text.strip() else None)
-
-    said = transcript.text.strip()
-    plausible = [c for c in phrase_cands if c.score <= absolute_max]
-
-    # 1. Transcript and a saved phrase agree -> show the phrase (it carries
-    #    the user's picture and is auto-spoken as a confident phrase).
-    agreeing = next((c for c in phrase_cands if texts_agree(c.text, said)), None)
-    if agreeing is None:
-        phrase = next((p for p in phrases if texts_agree(p.text, said)), None)
-        if phrase is not None:
-            agreeing = MatchCandidate(
-                phrase_id=phrase.id, text=phrase.text, emoji=phrase.emoji,
-                image=f'/api/phrases/{phrase.id}/image' if phrase.image else None,
-                score=0.0)
-    if agreeing is not None:
-        rest = [c for c in plausible if c.phrase_id != agreeing.phrase_id]
-        return MatchResult(attempt_id=match.attempt_id, confident=True,
-                           candidates=[agreeing, *rest][:MAX_CANDIDATES], transcript=said)
-
-    generated = MatchCandidate(type='generated', text=said,
-                               score=round(max(0.0, -transcript.avg_logprob), 4))
-
-    # 2. A personal word the sound matcher is sure about wins: Whisper can
-    #    spell "wawa" but cannot know it means water.
-    if match.confident and top_is_personal:
-        rest = [c for c in plausible[1:]]
-        return MatchResult(attempt_id=match.attempt_id, confident=True,
-                           candidates=[top, generated, *rest][:MAX_CANDIDATES], transcript=said)
-
-    # 3. Otherwise: what they actually said, first. Plausible saved phrases
-    #    follow as alternatives, one tap away.
-    return MatchResult(attempt_id=match.attempt_id, confident=True,
-                       candidates=[generated, *plausible][:MAX_CANDIDATES], transcript=said)
 
 
 class RecognitionService:
@@ -141,12 +66,26 @@ class RecognitionService:
             log.exception('Could not read preferences; phonetic mode off for this attempt')
             return False
 
-    def _run_cascade(self, ctx: RecognitionContext) -> MatchResult:
-        ran: List[StageResult] = []
+    def _eligible(self, ctx: RecognitionContext) -> List[RecognitionStage]:
+        out = []
         for stage in self.stages:
             try:
-                if not stage.enabled(ctx) or not stage.available():
-                    continue
+                if stage.enabled(ctx) and stage.available():
+                    out.append(stage)
+            except Exception:
+                log.exception('Recognition stage %r failed its checks; skipping it', getattr(stage, 'name', stage))
+        return out
+
+    def _run_cascade(self, ctx: RecognitionContext) -> MatchResult:
+        ran: List[StageResult] = []
+        stages = self._eligible(ctx)
+        for index, stage in enumerate(stages):
+            # Start the next stage's heavy model work now, on its own thread,
+            # so it overlaps this stage instead of waiting for it. If this
+            # stage settles the answer, the head start is simply not used.
+            if index + 1 < len(stages):
+                _prefetch(stage, stages[index + 1], ctx)
+            try:
                 outcome = stage.run(ctx)
             except Exception:
                 # A missing model or a broken recognizer must never stop the
@@ -157,6 +96,8 @@ class RecognitionService:
             ctx.extras.setdefault('stages_run', []).append(outcome.stage)
             if outcome.confident and getattr(stage, 'may_confirm', False) and outcome.candidates:
                 return self._result(ctx, outcome.candidates, confident=True)
+            if outcome.final and outcome.candidates:
+                break  # sure enough to skip later stages, still confirmed by the user
         return self._result(ctx, merge_unconfident(ran), confident=False)
 
     def _result(self, ctx, candidates: List[MatchCandidate], confident: bool) -> MatchResult:
@@ -164,7 +105,33 @@ class RecognitionService:
         return MatchResult(
             attempt_id=ctx.attempt_id, confident=confident, candidates=candidates,
             stage=candidates[0].source if candidates else 'phrase',
-            phonetic_mode=ctx.phonetic_mode)
+            phonetic_mode=ctx.phonetic_mode,
+            phonetic_skipped_reason=self._phonetic_skipped(ctx))
+
+    def _phonetic_skipped(self, ctx) -> Optional[str]:
+        """Why the user's-sounds stage did not run, when the switch is on."""
+        if not ctx.phonetic_mode or 'phonetic' in ctx.extras.get('stages_run', []):
+            return None
+        stage = next((s for s in self.stages if getattr(s, 'name', '') == 'phonetic'), None)
+        if stage is None:
+            return "Sound learning isn't part of this server."
+        return getattr(stage, 'unavailable_reason', lambda: None)() or None
+
+
+def _prefetch(current, stage, ctx: RecognitionContext) -> None:
+    prefetch = getattr(stage, 'prefetch', None)
+    if prefetch is None:
+        return
+    # Behind a stage that can confirm on its own (a saved phrase recognized
+    # outright is the common case) a head start is mostly wasted work that
+    # competes for the CPU, so only start early behind stages that never do.
+    if getattr(current, 'may_confirm', False):
+        return
+    try:
+        prefetch(ctx)
+    except Exception:
+        # The stage will simply do the work itself when it runs.
+        log.exception('Could not start stage %r early', getattr(stage, 'name', stage))
 
 
 def merge_unconfident(results: List[StageResult]) -> List[MatchCandidate]:
@@ -184,9 +151,14 @@ def merge_unconfident(results: List[StageResult]) -> List[MatchCandidate]:
     speech-to-text appears once, in its first position.
     """
     phrase = [r for r in results if r.stage == 'phrase']
-    others = [r for r in results if r.stage != 'phrase']
+    # Generated stages: those whose answer is believable first (speech-to-text
+    # that heard words; the phonetic decoder only when it passed its own
+    # check), then cascade order. Each stage's best answer is placed before
+    # anyone's second, so one recognizer's guesses can never crowd out another.
+    others = sorted((r for r in results if r.stage != 'phrase'), key=lambda r: not r.plausible)
     phrase_candidates = [c for r in phrase for c in r.candidates]
-    other_candidates = [c for r in others for c in r.candidates]
+    other_candidates = ([r.candidates[0] for r in others if r.candidates]
+                        + [c for r in others for c in r.candidates[1:]])
     corroborated = [c for c in other_candidates if c.type == 'phrase']
     other_candidates = [c for c in other_candidates if c.type != 'phrase']
     if any(r.plausible for r in phrase) and phrase_candidates:

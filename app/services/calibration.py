@@ -108,10 +108,15 @@ class SentenceRecord:
     text: str
     recorded_at: str
     duration_sec: float
+    #: Which take of this phrase (1-based). Enrollment asks for two.
+    take: int = 1
     #: What the recognizer made of the whole take ("" when it could not run).
     transcript: str = ""
     audio_path: Optional[str] = None
     words: List[WordClip] = field(default_factory=list)
+    #: The Talk-mode phrase and sample this take was saved as (Task 24).
+    phrase_id: Optional[str] = None
+    sample_id: Optional[str] = None
 
     @property
     def placed_count(self) -> int:
@@ -168,17 +173,25 @@ class CalibrationStore:
     def index_path(self) -> Path:
         return self.root / INDEX_NAME
 
+    def take_folder(self, sentence_id: str, take: int = 1) -> Path:
+        """Take 1 keeps the original layout (``<id>/``); later takes live in
+        ``<id>/take-<n>/`` so the two never share clips."""
+        folder = self.root / _safe_id(sentence_id)
+        return folder if take == 1 else folder / f"take-{take}"
+
     def save_sentence(self, sentence_id: str, text: str, audio: np.ndarray, sr: int,
-                      transcript: str = "", heard=()) -> SentenceRecord:
+                      transcript: str = "", heard=(), take: int = 1) -> SentenceRecord:
         """Write the take, cut and write its word clips, update the index.
 
-        Re-recording a sentence replaces it: the old clips are removed first,
-        so a second take never leaves half of a first one behind.
+        Re-recording a take replaces it: the old clips are removed first, so a
+        new take never leaves half of an old one behind. Other takes of the
+        same phrase are untouched.
         """
         sentence_id = _safe_id(sentence_id)
+        take = _valid_take(take)
         expected = expected_words(text)
         clips = cut_words(audio, sr, expected, heard)
-        folder = self.root / sentence_id
+        folder = self.take_folder(sentence_id, take)
         words_dir = folder / "words"
         with data_lock(self.data_dir):
             _clear(words_dir)
@@ -198,30 +211,56 @@ class CalibrationStore:
                 id=sentence_id, text=" ".join(expected),
                 recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 duration_sec=round(len(audio) / sr, 3) if sr else 0.0,
+                take=take,
                 transcript=transcript,
                 audio_path=str(audio_path.relative_to(self.data_dir)),
                 words=clips)
-            records = {r["id"]: r for r in self._read_index()}
-            records[sentence_id] = record.to_json()
+            records = {_key(r): r for r in self._read_index()}
+            records[(sentence_id, take)] = record.to_json()
             atomic_json(self.index_path, list(records.values()))
         return record
+
+    def update_record(self, sentence_id: str, take: int, **fields) -> Optional[dict]:
+        """Set extra fields on one take's index record (e.g. its Talk sample)."""
+        key = (_safe_id(sentence_id), _valid_take(take))
+        with data_lock(self.data_dir):
+            records = self._read_index()
+            found = None
+            for record in records:
+                if _key(record) == key:
+                    record.update(fields)
+                    found = record
+            if found is not None:
+                atomic_json(self.index_path, records)
+            return found
 
     def list_sentences(self) -> List[dict]:
         with data_lock(self.data_dir):
             return self._read_index()
 
-    def get_sentence(self, sentence_id: str) -> Optional[dict]:
-        wanted = _safe_id(sentence_id)
-        return next((r for r in self.list_sentences() if r.get("id") == wanted), None)
+    def get_sentence(self, sentence_id: str, take: int = 1) -> Optional[dict]:
+        wanted = (_safe_id(sentence_id), _valid_take(take))
+        return next((r for r in self.list_sentences() if _key(r) == wanted), None)
 
-    def delete_sentence(self, sentence_id: str) -> bool:
+    def delete_sentence(self, sentence_id: str, take: Optional[int] = None) -> List[dict]:
+        """Delete one take, or every take of the phrase when *take* is None.
+        Returns the deleted records (empty when there was nothing)."""
         sentence_id = _safe_id(sentence_id)
         with data_lock(self.data_dir):
-            records = [r for r in self._read_index() if r.get("id") != sentence_id]
-            existed = len(records) != len(self._read_index())
-            _clear(self.root / sentence_id)
-            atomic_json(self.index_path, records)
-        return existed
+            records = self._read_index()
+            doomed = [r for r in records if r.get("id") == sentence_id
+                      and (take is None or _key(r)[1] == _valid_take(take))]
+            if take is None:
+                _clear(self.root / sentence_id)
+            else:
+                folder = self.take_folder(sentence_id, _valid_take(take))
+                for sub in ("words",):
+                    _clear(folder / sub)
+                (folder / "sentence.wav").unlink(missing_ok=True)
+                if folder != self.root / sentence_id:
+                    _clear(folder)
+            atomic_json(self.index_path, [r for r in records if r not in doomed])
+        return doomed
 
     def resolve(self, relative: str) -> Optional[Path]:
         """Turn a stored relative path back into a file inside the data dir."""
@@ -239,6 +278,20 @@ class CalibrationStore:
         except (OSError, ValueError):
             return []
         return value if isinstance(value, list) else []
+
+
+MAX_TAKES = 5
+
+
+def _valid_take(take) -> int:
+    take = int(take)
+    if not 1 <= take <= MAX_TAKES:
+        raise ValueError(f"take must be between 1 and {MAX_TAKES}")
+    return take
+
+
+def _key(record: dict):
+    return (record.get("id"), int(record.get("take", 1) or 1))
 
 
 def _safe_id(sentence_id: str) -> str:

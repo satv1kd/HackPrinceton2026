@@ -304,12 +304,13 @@
         "description": "Build a frequency-ranked common-English lexicon with canonical ARPAbet pronunciations (data/lexicon/words.tsv), using the existing app/phonetics inventory and mapping, with a fallback for words not in the dictionary.",
         "details": "The phonetic decoder (Task 29) can only output words in this lexicon; the coverage checker (Task 23) uses it to transcribe phrases.\n\nReuse what exists: `app/phonetics/inventory.py` (39-phoneme ARPAbet canonical set, `validate_sequence`) and `app/phonetics/mapping.py` (`arpabet_to_canonical`, `espeak_to_canonical`). Do not add a second inventory.\n\n1. **Module `app/phonetics/lexicon.py`:**\n```python\n@dataclass\nclass LexiconEntry:\n    word: str; frequency: float; pronunciations: list[list[str]]  # canonical, stress-free\n\nclass Lexicon:\n    @classmethod\n    def load(cls, path: Path) -> \"Lexicon\": ...\n    def pronounce(self, word: str) -> list[list[str]]: ...   # [] if unknown\n    def transcribe_text(self, text: str) -> list[str] | None: ...  # phrase -> phoneme sequence, None if any word unknown\n    def words(self) -> Iterable[LexiconEntry]: ...\n```\n\n2. **Builder script `scripts/build_lexicon.py`:**\n   - Pronunciations: CMUdict (via the `cmudict` pip package or the raw dict file), converted with `arpabet_to_canonical`.\n   - Ranking: a word-frequency list. **The source is an open question in the PRD (license must be permissive); choose and document it in this task before building**, e.g. evaluate `wordfreq` (check its data license) or another list.\n   - Keep the top `LEXICON_SIZE` words that have a pronunciation, plus every word in saved phrases, `enrollment_set.json` and phrase packs.\n   - Output `data/lexicon/words.tsv` (`word<TAB>frequency<TAB>pron1|pron2`), written atomically.\n\n3. **Out-of-dictionary words** (custom phrases): optional G2P fallback via `phonemizer` + espeak-ng, mapped with `espeak_to_canonical`; if unavailable, mark the phrase's `phonemes` as `None` and exclude it from phonetic training (log it).\n\n4. **Phrase phonemes:** when a non-personal phrase is created (`PhraseStore.create_phrase`), fill `Phrase.phonemes` from the lexicon. Personal words stay `None` (PRD: they don't follow standard pronunciation).\n\n5. Dependencies go in a new `requirements-phonetics.txt`, installed by `make install-phonetics` (Task 25 adds torch/transformers to the same file).\n\n**Test Strategy:**\n1. Small fixture dictionary: `pronounce(\"water\")` returns canonical, stress-free phonemes that pass `validate_sequence`.\n2. Multiple pronunciations are kept; unknown word returns `[]`; `transcribe_text` returns None if any word is unknown.\n3. Builder on fixtures keeps exactly `LEXICON_SIZE` frequency-ranked words plus the forced-in phrase words.\n4. Creating a custom (non-personal) phrase fills `phonemes`; a personal word leaves it `None`.\n5. Output TSV round-trips through `Lexicon.load`.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "16"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T03:56:46.853Z"
       },
       {
         "id": "23",
@@ -317,12 +318,13 @@
         "description": "Author a concise built-in set of short everyday phrases that together cover every English phoneme, and enforce coverage with an automated checker script and unit test.",
         "details": "The user records these once (~5 minutes). They are both whole-phrase templates (DTW) and the training data for the user's sound profile and sound bank.\n\n1. **Coverage checker `app/phonetics/coverage.py` + `scripts/check_enrollment_coverage.py`:**\n```python\n@dataclass\nclass CoverageReport:\n    counts: dict[str, int]                 # phoneme -> occurrences across the set\n    initial: set[str]; final: set[str]     # consonants seen word-initially / word-finally\n    missing: list[str]                     # below MIN_PHONEME_OCCURRENCES\n    missing_initial: list[str]; missing_final: list[str]\n    ok: bool\ndef check_coverage(phrases: list[str], lexicon: Lexicon, min_occurrences: int) -> CoverageReport\n```\n   - Every phoneme in `inventory` appears at least `MIN_PHONEME_OCCURRENCES` times (default 2).\n   - Every consonant appears word-initially and word-finally where English allows it. Use `inventory.allows_word_initial` / `allows_word_final` for the exemptions (e.g. NG initial, ZH initial).\n   - The script prints a coverage table and exits non-zero on failure.\n\n2. **The set `app/phonetics/enrollment_set.json`:** ~25-30 phrases, each `{text, emoji, phonemes}` (phonemes filled by the lexicon).\n   - Short and functional (target <= 6 words): needs, greetings, café, help, yes/no.\n   - Easy to say; avoid tongue twisters.\n   - **Iterate until the checker passes.** The exact list is written and validated in this task, not invented ahead of time.\n   - Keep phrases concise so the set covers all sounds in as few recordings as possible (report total word count and an estimated recording time).\n\n3. **Unit test** that runs `check_coverage` on the shipped set, so it can never regress.\n\n4. `GET /api/enrollment-set` returns the set with per-phrase recording status (which built-in phrases already exist in `phrases.json` with >= 3 samples, matched by an `enrollment_key`).\n\n**Test Strategy:**\n1. Checker on a hand-made list missing one phoneme reports it in `missing`; on a list missing an initial /S/ reports `missing_initial`.\n2. Exempt positions (NG initial) never fail.\n3. The shipped `enrollment_set.json` passes (test fails the build if someone edits it badly).\n4. Every phrase in the set has phonemes and is <= 6 words.\n5. `/api/enrollment-set` reports recorded/unrecorded status correctly.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "22"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T03:56:46.856Z"
       },
       {
         "id": "24",
@@ -330,13 +332,14 @@
         "description": "Add a guided Setup flow that walks the user through recording the phonetically balanced phrase set (3 takes each), with progress and resume, saving them as enrollment phrases.",
         "details": "Reuses the existing recording UI rather than building a new one: `SampleRecorderFlow` in `static/js/setup.js` already records 3 samples with play / re-record / keep.\n\n1. **Entry point:** a prominent \"Learn my sounds (about 5 minutes)\" card in Setup, showing progress (\"12 of 28 phrases\").\n\n2. **Flow (`static/js/enrollment.js`):**\n   - Fetch `/api/enrollment-set`; skip phrases already complete.\n   - For each phrase: create it if missing (`POST /api/phrases` with `origin='enrollment'` and an `enrollment_key`; extend the phrases API to accept these two fields) and open `SampleRecorderFlow` for it.\n   - \"Done for now\" saves progress; reopening resumes at the first incomplete phrase.\n   - Finishing shows a summary and suggests turning on phonetic mode (Task 21).\n\n3. **Server:** `PhraseStore.create_phrase` accepts `origin='enrollment'` and `enrollment_key` (add the field to `Phrase` with default `None`, backward compatible with existing phrases.json). Enrollment phrases get `phonemes` from `enrollment_set.json`.\n\n4. Enrollment phrases behave like normal phrases in Talk mode (they are DTW templates too).\n\n5. Accessibility: one phrase per screen, big emoji and text, progress announced via `role=\"status\"`.\n\n**Test Strategy:**\n1. jsdom: with a mocked set of 3 phrases where 1 is complete, the flow starts at phrase 2 and creates it with `origin='enrollment'`.\n2. \"Done for now\" then reopen resumes at the next incomplete phrase.\n3. API: creating an enrollment phrase stores `origin`, `enrollment_key` and phonemes; old phrases.json without `enrollment_key` still loads.\n4. Completing all phrases shows the summary and the phonetic-mode suggestion.\n5. Manual: full enrollment on iPhone Safari over the tunnel takes about 5 minutes.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "23",
           "9"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:01:12.780Z"
       },
       {
         "id": "25",
@@ -344,13 +347,14 @@
         "description": "Wire the existing app/phonetics PhonemeRecognizer into sample upload and recognition so every recording gets cached phoneme sequences and posteriors, as an optional install that never blocks the core app.",
         "details": "`app/phonetics/recognizer.py` already provides `PhonemeRecognizer` (cached sequence + per-frame posteriors, lazy `Wav2Vec2PhonemeBackend`, `DEFAULT_MODEL = facebook/wav2vec2-lv-60-espeak-cv-ft`, `ModelUnavailableError`). This task connects it; it does not rewrite it.\n\n1. **Dependencies:** add `torch` and `transformers` to `requirements-phonetics.txt` (`make install-phonetics`). Confirm wheels for Python 3.13 and the model's license and output symbol set (PRD open question) and record the findings in the module docstring.\n\n2. **Model prefetch:** extend `scripts/download_models.py` with `--phonemes` (downloads `PHONEME_MODEL`), so the demo never downloads at runtime.\n\n3. **Service wiring:** build one `PhonemeRecognizer` in the lifespan (`app/task_integration.py`), exposed via `app.state`, only if the model is available; otherwise `None`.\n\n4. **On sample upload** (`POST /api/phrases/{id}/samples`): after the MFCC step, run phoneme recognition in a background thread (do not slow the upload response) and cache it under `cache_id = <phrase_id>/<sample_id>`. Invalidate on sample/phrase delete, alongside the feature cache.\n\n5. **On recognize:** the phonetic stage (Task 30) needs phonemes; expose a helper that the cascade calls only when phonetic mode is on, and put the result in `ctx.extras['recognized_phonemes']`. Pass it to `AttemptStore.save(..., recognized_phonemes=...)` (parameter already exists).\n\n6. **Backfill:** `scripts/backfill_phonemes.py` recognizes all existing samples (for users who enrolled before installing).\n\n7. Readiness: `phonetic_readiness()` reports \"Phoneme model not installed\" when unavailable.\n\n8. Latency: run `scripts/measure_phoneme_latency.py` on real enrollment audio and record the median real-time factor in the task notes.\n\n**Test Strategy:**\n1. With a fake backend: uploading a sample caches phonemes for it; deleting the sample removes the cache.\n2. Without torch installed: upload, recognize and health all still work, and readiness reports the model as missing.\n3. Recognize with phonetic mode on stores `recognized_phonemes` on the attempt; with mode off it does not run recognition.\n4. Backfill script processes only samples without a cache entry.\n5. Existing `tests/test_phoneme_recognizer.py` still passes.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "16",
           "3"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:04:13.717Z"
       },
       {
         "id": "26",
@@ -358,12 +362,13 @@
         "description": "Implement weighted edit-distance alignment between recognized and expected phoneme sequences, producing (intended, recognized) pairs with deletion and insertion sentinels, for use by the sound profile and sound bank.",
         "details": "Pure, dependency-free module. The inventory already defines what it needs: `DELETION = \"<DEL>\"`, `INSERTION = \"<INS>\"` and `feature_similarity(a, b)` in `app/phonetics/inventory.py`.\n\n1. **Module `app/phonetics/aligner.py`:**\n```python\n@dataclass(frozen=True)\nclass AlignedPair:\n    intended: str      # canonical phoneme or INSERTION\n    recognized: str    # canonical phoneme or DELETION\n\n@dataclass\nclass Alignment:\n    pairs: list[AlignedPair]\n    cost: float\n\ndef align(expected: Sequence[str], recognized: Sequence[str],\n          sub_cost: Callable[[str, str], float] | None = None,\n          del_cost: float = 1.0, ins_cost: float = 1.0) -> Alignment\n```\n   - Needleman-Wunsch / weighted Levenshtein with backtrace.\n   - Default substitution cost `1 - feature_similarity(a, b)` (0 for identical), so /L/ -> /W/ costs less than /L/ -> /K/.\n   - Deterministic tie-breaking (documented) so retraining is reproducible.\n   - Validate inputs with `validate_sequence`.\n\n2. A cost-function hook lets the decoder (Task 29) reuse the same aligner with `-log P` costs from the profile.\n\n**Test Strategy:**\n1. Identical sequences -> all matching pairs, cost 0.\n2. Single substitution, deletion and insertion produce the expected pairs and sentinels.\n3. Similar-sound substitution is cheaper than a dissimilar one (L->W vs L->K).\n4. Ties resolve the same way on repeated runs.\n5. Invalid phoneme symbols raise.\n6. Property test (random sequences): the cost equals the sum of the chosen pair costs.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "16"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:05:15.598Z"
       },
       {
         "id": "27",
@@ -371,14 +376,15 @@
         "description": "Build a versioned, smoothed per-user model of how the speaker produces each English phoneme, P(recognized | intended), from aligned enrollment recordings, excluding personal words.",
         "details": "The statistical core of \"learning how this person says each sound\" (PRD F6 step 3).\n\n1. **Module `app/phonetics/profile.py`:**\n```python\nclass SoundProfile:\n    version: int\n    counts: dict[str, dict[str, float]]     # intended -> recognized (incl. DELETION); INSERTION row\n    def probability(self, intended: str, recognized: str) -> float: ...\n    def cost(self, intended: str, recognized: str) -> float: ...   # -log P, for the aligner/decoder\n    def coverage(self) -> dict[str, int]: ...                      # examples per intended phoneme\n    @classmethod\n    def build(cls, alignments: Iterable[Alignment], alpha: float, prior: \"PriorMatrix\") -> \"SoundProfile\": ...\n```\n   - Smoothing: `P = (C + alpha * Prior) / row sum` with `alpha = PROFILE_SMOOTHING_ALPHA`, so sounds with few examples stay close to the prior.\n   - Prior: identity-heavy, with off-diagonal mass from `feature_similarity` (documented constants).\n\n2. **Building from data:** for every enrollment and feedback sample with known `phonemes` (non-personal phrases), align cached recognized phonemes (Task 25) with expected phonemes (Task 26) and accumulate.\n\n3. **Storage:** `DATA_DIR/profile/profile_v<N>.json` plus `current.json` (pointer), written atomically; keep previous versions for rollback (Task 31).\n\n4. **Build trigger:** `scripts/build_profile.py`, and automatically when enrollment completes (Task 24 finish hook calls `POST /api/profile/rebuild`, added here).\n\n5. **Readiness:** `phonetic_readiness()` reports \"Record the sound set first\" until every phoneme has at least `MIN_PHONEME_OCCURRENCES` aligned examples.\n\n**Test Strategy:**\n1. Synthetic alignments where /R/ is always recognized as /W/ -> `P(W|R)` is high and `P(R|R)` low; unseen phonemes stay near the prior.\n2. Rows are valid probability distributions (sum to 1, all > 0).\n3. Personal-word samples are excluded.\n4. Save/load round-trip; version increments; `current.json` points to the newest.\n5. Readiness flips to ready once coverage is met.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "24",
           "25",
           "26"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:10:23.375Z"
       },
       {
         "id": "28",
@@ -386,14 +392,15 @@
         "description": "Cut the user's enrollment recordings into per-phoneme audio segments with CTC forced alignment, store their acoustic features as a personal sound bank, and chain them into word templates for acoustic matching.",
         "details": "This is the literal \"chain the user's own sounds together to make words\" component. It complements the statistical profile (Task 27): the profile models which sound comes out, the sound bank models what it sounds like.\n\n1. **Forced alignment (`app/phonetics/segmenter.py`):**\n   - Input: a sample's cached per-frame phoneme posteriors (Task 25) and its expected phoneme sequence.\n   - CTC Viterbi forced alignment implemented in numpy over the cached posteriors (avoids depending on a torchaudio alignment API that may change). Map the expected canonical phonemes to the model's vocabulary via `app/phonetics/mapping.py`.\n   - Output: `[(phoneme, start_sec, end_sec, confidence)]`. Drop segments with very low confidence.\n\n2. **Sound bank (`app/phonetics/sound_bank.py`):**\n```python\nclass SoundBank:\n    def add_sample(self, phrase_id, sample_id, segments, features) -> None\n    def units(self, phoneme: str) -> list[np.ndarray]     # MFCC (or embedding) slices\n    def chain(self, phonemes: list[str]) -> np.ndarray   # concatenated template for a word/phrase\n    def coverage(self) -> dict[str, int]\n```\n   - Features: slices of the cached MFCC matrices (same `FeatureExtractor`, so DTW distances are comparable), stored under `DATA_DIR/sound_bank/<extractor>/`.\n   - `chain()` picks the most typical unit per phoneme (medoid by DTW distance) and concatenates; optionally a few variants per word.\n\n3. **Acoustic rescoring helper:** `score_word(query_features, phonemes) -> float` = path-normalized DTW distance between the query and the chained template (reuse `app/services/matcher.py` distance code).\n\n4. Rebuild the bank when enrollment completes and when retraining runs (Task 31).\n\n**Test Strategy:**\n1. Forced alignment on synthetic posteriors with known boundaries recovers them within one frame.\n2. Segments are contiguous, ordered and within the clip duration.\n3. `chain([\"W\",\"AA\",\"T\",\"ER\"])` concatenates units in order with the expected total frame count.\n4. `score_word` ranks a query built from the same units better than a different word.\n5. Deleting a sample removes its units from the bank.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "25",
           "26",
           "23"
         ],
         "priority": "medium",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:12:41.992Z"
       },
       {
         "id": "29",
@@ -401,14 +408,15 @@
         "description": "Decode a recognized phoneme sequence into the top-3 most likely common-English words or short sentences using the user's sound profile costs, a word-frequency prior and a saved-phrase bonus, with optional sound-bank acoustic rescoring.",
         "details": "PRD F6 step 4: generalize to words the user never recorded.\n\n1. **Module `app/phonetics/decoder.py`:**\n```python\n@dataclass\nclass Hypothesis:\n    words: list[str]; text: str; cost: float; acoustic: float | None\n\nclass PhoneticDecoder:\n    def __init__(self, lexicon: Lexicon, profile: SoundProfile, sound_bank: SoundBank | None,\n                 lm_weight: float, max_words: int, beam_width: int = 32): ...\n    def decode(self, recognized: list[str], query_features: np.ndarray | None = None,\n               phrase_texts: list[str] = (), k: int = 3) -> list[Hypothesis]: ...\n```\n   - **Word cost:** minimum-cost alignment of the word's pronunciation(s) against a span of the recognized phonemes, using the aligner (Task 26) with `profile.cost` (-log P).\n   - **Sentence search:** beam search segmenting the recognized sequence into up to `MAX_DECODE_WORDS` lexicon words. Total = profile cost + `LM_WEIGHT` x (-log word frequency) - bonus for words/phrases in the user's saved phrases and phrase packs.\n   - **Rescoring:** if a sound bank and query features are given, rescore the top-N with `SoundBank.score_word` (weighted, configurable).\n   - Pre-index the lexicon by first phoneme / length to keep the beam fast; measure and record latency.\n\n2. **Upgrade path (document, don't build):** scoring directly against CTC posteriors instead of the 1-best phoneme string.\n\n3. The decoder is pure (no I/O); the stage (Task 30) loads its inputs.\n\n**Test Strategy:**\n1. Tiny lexicon + a profile where /R/ -> /W/: recognized \"W AA T ER\" decodes to \"water\"; recognized \"W EH D\" decodes to \"red\" over \"wed\" when the profile strongly predicts R -> W.\n2. Two-word utterance segments into two words; never exceeds `MAX_DECODE_WORDS`.\n3. LM weight 0 vs high changes ranking predictably between a rare and a common word.\n4. A saved-phrase word gets the bonus.\n5. Sound-bank rescoring can reorder the top 2.\n6. Decode latency for a 6-word utterance with the real lexicon stays within a documented budget.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "22",
           "27",
           "28"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:16:03.133Z"
       },
       {
         "id": "30",
@@ -416,14 +424,15 @@
         "description": "Plug the phonetic decoder into the recognition cascade as the stage between saved phrases and speech-to-text, active only when phonetic mode is on and the user's profile is ready, falling through to STT when unsure.",
         "details": "Final integration of F6 into Talk mode, following the cascade decided for this project: saved phrase -> (if phonetic mode on) phonetic decoder -> speech-to-text.\n\n1. **PhoneticDecoderStage (app/services/recognition_stages.py):**\n   - `enabled(ctx)`: `ctx.phonetic_mode`.\n   - `available()`: phoneme model loaded (Task 25) and `phonetic_readiness()` ready (profile + coverage).\n   - `run(ctx)`: get `recognized_phonemes` (Task 25 helper), decode top-3 (Task 29), map each hypothesis to `MatchCandidate(type='generated', source='phonetic', text=..., score=...)`.\n   - If a hypothesis text matches a saved phrase (same normalization as Task 19), return it as `type='phrase'`, `source='phonetic'` instead.\n\n2. **Unsure -> fall through to STT:** define a confidence rule (decoder cost margin between the 1st and 2nd hypothesis, and an absolute cost cap; config keys `PHONETIC_MARGIN`, `PHONETIC_MAX_COST`, tuned in Task 34). If it fails, the stage returns its candidates with `confident=False` and the cascade continues to STT. Merge rule: when both phonetic and STT produced candidates, show up to 3, phonetic first when it passed its margin, otherwise STT first. Never auto-confident.\n\n3. **Mode off / not ready:** the stage is skipped entirely (no phoneme inference cost).\n\n4. Keep the readiness reason in the `/api/recognize` response (`phonetic_skipped_reason`) for the Talk indicator (Task 21).\n\n**Test Strategy:**\n1. Fakes: mode off -> phonetic stage never runs; mode on + not ready -> skipped with reason.\n2. Mode on + ready + decoder above margin -> candidates `source='phonetic'`, STT not called.\n3. Decoder below margin -> STT runs; merged list is ordered per the documented rule and capped at 3.\n4. A phonetic hypothesis equal to a saved phrase is returned as that phrase.\n5. Never `confident=True`.\n6. End to end with a stub backend through `/api/recognize`: `stage` reports `phonetic` or `stt` correctly.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "17",
           "29",
           "21"
         ],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:20:08.953Z"
       },
       {
         "id": "31",
@@ -431,14 +440,15 @@
         "description": "Count new labeled examples per phoneme from Yes/No feedback, retrain a phoneme's profile row (and its sound-bank units) once it reaches RETRAIN_MIN_NEW_EXAMPLES, keep the new profile only if held-out accuracy does not drop, and expose profile status.",
         "details": "PRD F6 step 5 and F4: every Yes/No tap is training data.\n\n1. **Counters:** on each feedback event with a label (phrase with phonemes, or text that the lexicon can transcribe), align the attempt's `recognized_phonemes` with the label's expected phonemes and increment `DATA_DIR/profile/counters.json[intended]`. Hook into `FeedbackStore.record` through a small listener interface rather than editing its internals; undo (`FeedbackStore.undo`) must decrement.\n\n2. **Retrainer (`app/phonetics/retrainer.py`):** when any phoneme's counter reaches `RETRAIN_MIN_NEW_EXAMPLES` (default 10):\n   - Rebuild that phoneme's row from all its aligned examples, producing a candidate profile version.\n   - Evaluate current vs candidate on a held-out slice (`HOLDOUT_FRACTION`) of labeled attempts: top-1 and top-3 decoder accuracy.\n   - Promote only if not worse; otherwise keep the current version and log it. Reset the counter either way.\n   - Also refresh that phoneme's units in the sound bank.\n   - Runs in a background thread; never blocks Talk mode.\n\n3. **API:**\n   - `GET /api/profile` -> per-phoneme coverage, counters / progress toward the next retrain, current version, last retrain result.\n   - `POST /api/profile/retrain` -> force a retrain now (demo/testing).\n\n4. Feedback events record `used_for_profile_version` (PRD data model).\n\n**Test Strategy:**\n1. Ten labeled attempts for /R/ trigger exactly one retrain; nine do not.\n2. Undo decrements the counter.\n3. A candidate that lowers held-out accuracy is rejected and the version is unchanged; a better one is promoted.\n4. Retraining runs off the request thread (the feedback request returns immediately).\n5. `GET /api/profile` reports the counts and version; `POST /api/profile/retrain` works when there is nothing to retrain.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "27",
           "28",
           "6"
         ],
         "priority": "medium",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:22:47.084Z"
       },
       {
         "id": "32",
@@ -446,13 +456,14 @@
         "description": "Show which English sounds Heard has learned well, which need more examples, and progress toward the next automatic retrain, using GET /api/profile.",
         "details": "Gives the user and supporter visibility into the phonetic engine, and a reason to keep giving feedback.\n\n1. **UI (`static/js/coverage.js`, in Setup):**\n   - A grid of sounds grouped as consonants / vowels, each showing an example word (\"R as in red\") and a status: learned / needs more / not yet recorded.\n   - Progress bars toward the next retrain for sounds with new examples.\n   - Current profile version and the time of the last retrain.\n   - A \"Record more for weak sounds\" action that opens the enrollment flow (Task 24) filtered to phrases containing weak sounds.\n\n2. Plain language: no ARPAbet symbols as the main label (show them small, for supporters).\n\n3. Refreshes after the `heard:feedback` event (already dispatched by `talk.js`).\n\n**Test Strategy:**\n1. jsdom with a mocked `/api/profile`: statuses render per sound with the right labels.\n2. The weak-sounds action requests only phrases containing those sounds.\n3. A `heard:feedback` event triggers a refresh.\n4. Screen reader: each sound tile has an accessible name including its status.",
         "testStrategy": "",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           "31",
           "24"
         ],
         "priority": "medium",
-        "subtasks": []
+        "subtasks": [],
+        "updatedAt": "2026-11-15T04:26:44.371Z"
       },
       {
         "id": "33",
@@ -485,9 +496,9 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-11-15T01:38:16.158Z",
+      "lastModified": "2026-11-15T04:26:44.371Z",
       "taskCount": 34,
-      "completedCount": 17,
+      "completedCount": 28,
       "tags": [
         "master"
       ]

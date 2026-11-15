@@ -79,18 +79,22 @@
 
       <h2>4 · The calibration reading</h2>
       <p>
-        <a href="/calibrate">Calibration</a> asks you to read ten short
-        sentences that together contain every sound of English. While you
-        read, the words on screen fill in at your pace — tracked by speech
-        recognition when it cooperates, by the sound of your voice when it
-        doesn’t, and by a tap or an arrow key whenever you want. It never
-        marks you wrong, because you can’t be: it’s your voice.
+        <a href="/calibrate">Calibration</a> asks you to say 18 short everyday
+        phrases, twice each, that together contain every sound of English —
+        and become your first Talk phrases too. Each one is
+        shown in full: press “Start recording”, say it in your own way and at
+        your own pace, then “I’ve said it”. Nothing follows along word by word
+        or checks whether you got a word “right” — it never marks you wrong,
+        because you can’t be: it’s your voice. Afterwards the server cuts the
+        take into one clip per word, using the speech recognizer’s timings.
       </p>
       <p>
-        <strong>Honestly:</strong> today those recordings are stored on your
-        device and nothing more. They’re the raw material for the next step —
-        learning how <em>you</em> produce each sound, so Heard can understand
-        words you never recorded. That part is being built; it is not live.
+        <strong>Honestly:</strong> those recordings are stored by Heard on the
+        computer it runs on. Heard uses them to learn how <em>you</em> produce
+        each sound and — when you turn on “Learn from my sounds” — to suggest
+        words you never recorded. It is new and not yet measured on real
+        voices, so every suggestion is shown for you to confirm before it is
+        spoken.
       </p>
 
       <h2>What we don’t do</h2>
@@ -104,10 +108,10 @@
       <ul class="under-the-hood">
         <li><span>Transcription</span><span>Whisper (base.en via faster-whisper) on the local CPU, nudged toward your saved phrases; silence and Whisper’s stock hallucinations are filtered out.</span></li>
         <li><span>Matching</span><span>MFCC features compared with dynamic time warping against your sample recordings; confidence needs a clear margin before anything is called certain.</span></li>
-        <li><span>Reading tracker</span><span>Browser speech recognition, fuzzily aligned and forward-only; a voice-activity fallback paced by syllables; manual control that always wins.</span></li>
         <li><span>Speaking</span><span>A natural synthesized voice when a key is configured, with the browser’s built-in voice as the fallback.</span></li>
-        <li><span>Storage</span><span>JSON and audio files on disk for the app; IndexedDB in your browser for calibration recordings.</span></li>
-        <li><span>Planned</span><span>A per-person phonetic profile learned from calibration and everyday yes/no taps. In progress, not shipped.</span></li>
+        <li><span>Calibration</span><span>Each phrase is recorded whole, twice, and saved as it is — you read the words on screen, so nothing is transcribed. In the background the phoneme model lines each take up against the phrase’s sounds, which is what the sound profile learns from.</span></li>
+        <li><span>Storage</span><span>JSON and audio files on disk, on the computer running Heard — for the app and for calibration recordings alike. No cloud storage, no account.</span></li>
+        <li><span>Sound learning</span><span>A per-person phonetic profile (how each of your sounds comes out) learned from calibration and everyday yes/no taps; a phoneme model (wav2vec2) plus a decoder over 5,000 common words. Optional, off by default; it updates itself only when an update helps.</span></li>
       </ul>
 
       <p class="quiet" style="margin-top: 40px;">

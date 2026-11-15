@@ -161,3 +161,48 @@ def test_api_response_includes_new_fields(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["stage"] == "phrase" and body["phonetic_mode"] is False
+
+
+class EarlyStage(FakeStage):
+    """Records when its head start begins relative to the other stages' runs."""
+
+    def __init__(self, name, log, broken=False, **kw):
+        super().__init__(name, **kw)
+        self.log, self.broken = log, broken
+
+    def prefetch(self, ctx):
+        if self.broken:
+            raise RuntimeError("no head start today")
+        self.log.append(f"prefetch {self.name}")
+        ctx.prefetched[self.name] = "started"
+
+    def run(self, ctx):
+        self.log.append(f"run {self.name} ({ctx.prefetched.pop(self.name, 'cold')})")
+        return super().run(ctx)
+
+
+def test_the_next_stage_starts_while_the_current_one_runs(tmp_path):
+    log = []
+    first = EarlyStage("phrase", log, candidates=[phrase("a", 9.0)])
+    second = EarlyStage("phonetic", log, needs_phonetic=True, candidates=[generated("hi", "phonetic")])
+    third = EarlyStage("stt", log, candidates=[generated("hey")])
+    make_service(tmp_path, [first, second, third], phonetic_mode=True).recognize(wav(), "audio/wav")
+    assert log == ["prefetch phonetic", "run phrase (cold)", "prefetch stt",
+                   "run phonetic (started)", "run stt (started)"]
+
+
+def test_no_head_start_behind_a_stage_that_can_confirm(tmp_path):
+    log = []
+    first = EarlyStage("phrase", log, may_confirm=True, candidates=[phrase("a", 9.0)])
+    phonetic = EarlyStage("phonetic", log, needs_phonetic=True)       # switched off
+    stt = EarlyStage("stt", log, candidates=[generated("hey")])
+    make_service(tmp_path, [first, phonetic, stt], phonetic_mode=False).recognize(wav(), "audio/wav")
+    assert log == ["run phrase (cold)", "run stt (cold)"]
+
+
+def test_a_failed_head_start_does_not_stop_the_stage(tmp_path):
+    log = []
+    first = EarlyStage("phrase", log)
+    second = EarlyStage("stt", log, broken=True, candidates=[generated("hey")])
+    result = make_service(tmp_path, [first, second]).recognize(wav(), "audio/wav")
+    assert log == ["run phrase (cold)", "run stt (cold)"] and result.candidates[0].text == "hey"

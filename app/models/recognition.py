@@ -28,6 +28,8 @@ class MatchResult(BaseModel):
     #: Recognizer behind the first candidate ('phrase' when nothing matched).
     stage: CandidateSource = 'phrase'
     phonetic_mode: bool = False
+    #: When phonetic mode is on but the user's-sounds stage could not run, why.
+    phonetic_skipped_reason: str | None = None
     #: What local speech-to-text heard, verbatim (None when unavailable).
     #: Distinct from the candidates: a candidate may be a saved phrase
     #: substituted for these words, and the user deserves to see both.

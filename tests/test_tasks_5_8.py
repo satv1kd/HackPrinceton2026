@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from app.models.recognition import MatchCandidate, MatchResult
 from app.services.attempts import AttemptStore, utcnow
 from app.services.feedback import FeedbackStore, FeedbackConflict, IntegrationRequired, read_events
-from app.services.matcher import DTWMatcher, cosine_distance
+from app.services.matcher import DTWMatcher, cosine_distance, distance_matrix, dtw_distance
 from app.services.task_io import atomic_json
 from app.task_integration import install_tasks_5_8
 
@@ -285,3 +285,14 @@ def test_api_pipeline_and_validation(stack, monkeypatch):
         assert client.post('/api/feedback/undo', json={'attempt_id': data['attempt_id'], 'event_id': saved.json()['event_id']}).status_code == 200
         monkeypatch.setattr('app.routers.recognize.MAX_UPLOAD_BYTES', 5)
         assert client.post('/api/recognize', files={'audio': ('x.wav', b'123456', 'audio/wav')}).status_code == 413
+
+
+def test_vectorised_costs_match_the_per_frame_rule():
+    rng = np.random.default_rng(3)
+    a, b = rng.normal(size=(6, 4)), rng.normal(size=(5, 4))
+    a[2] = 0; b[1] = 0; b[4] = -a[0]                      # silence and an opposite frame
+    expected = np.array([[cosine_distance(x, y) for y in b] for x in a])
+    np.testing.assert_allclose(distance_matrix(a, b), expected, atol=1e-12)
+    np.testing.assert_allclose(distance_matrix(a, b, 'euclidean'),
+                               [[np.linalg.norm(x - y) for y in b] for x in a], atol=1e-12)
+    assert dtw_distance(a, a) == pytest.approx(0, abs=1e-12)

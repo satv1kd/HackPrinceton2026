@@ -1,6 +1,7 @@
 import { TalkMode } from './talk.js';
 import { SetupMode } from './setup.js';
 import { PreferencesClient, PhoneticToggle, bindListeningIndicator } from './preferences.js';
+import { SoundCoverage } from './coverage.js';
 
 export class HeardApp {
   constructor() {
@@ -9,7 +10,12 @@ export class HeardApp {
     this.setup = new SetupMode(this);
     this.preferences = new PreferencesClient();
     const settings = document.getElementById('listening-settings');
-    if (settings) this.phoneticToggle = new PhoneticToggle(settings, this.preferences, { notify: message => this.showToast(message) });
+    if (settings) this.phoneticToggle = new PhoneticToggle(settings, this.preferences, {
+      notify: message => this.showToast(message),
+      onEnroll: () => { globalThis.location.href = '/calibrate'; },
+    });
+    const coverage = document.getElementById('sound-coverage');
+    if (coverage) this.coverage = new SoundCoverage(coverage);
     const indicator = document.getElementById('listening-mode');
     if (indicator) bindListeningIndicator(indicator, this.preferences);
     this.preferences.load();
@@ -36,7 +42,7 @@ export class HeardApp {
       tab.setAttribute('aria-selected', String(name === mode));
       tab.tabIndex = name === mode ? 0 : -1;
     }
-    if (mode === 'setup') this.setup.load();
+    if (mode === 'setup') { this.setup.load(); this.coverage?.load(); }
     else this.setup.cancel();
     document.dispatchEvent(new CustomEvent('heard:modechange', { detail: { mode } }));
   }
