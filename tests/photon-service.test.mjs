@@ -270,13 +270,15 @@ test("the live refusal names both things that have to be true", async () => {
   assert.match(result.error, /\+15551234567/);
 });
 
-test("an account with no phone connected is caught by health, not by a send", async () => {
+test("an unsynced profile is reported, never treated as a failure", async () => {
+  // A live send succeeded with `imessageSynced: false`, so health must not
+  // refuse a setup that works - it says so and stays green.
   const fake = fakeSpectrum();
   const health = await liveTransport(fake, {
     cloudFactory: fakeCloud({ project: { name: "stutter", profile: { imessageSynced: false } } }),
   }).health();
-  assert.equal(health.ok, false);
-  assert.match(health.detail, /no phone connected/);
+  assert.equal(health.ok, true);
+  assert.match(health.detail, /profile not synced/);
 });
 
 test("an unrecognised failure keeps its raw message", async () => {

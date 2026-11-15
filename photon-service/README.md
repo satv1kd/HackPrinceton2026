@@ -145,15 +145,22 @@ string.
   answer `401 Missing authorization header` — they are for a signed-in
   dashboard session. That is why health probes `issueImessageTokens`.
 
-**Not delivered yet.** `space.send` answers
-`[spectrum-imessage] Target not allowed for this project`, because the Photon
-account has no phone connected (`project.profile.imessageSynced` is `false`),
-so no target is enrolled. Health checks that flag now and says so rather than
-letting a demo find out. What a successful send returns, and which of the two
-setup steps Photon is objecting to, are still unknown.
+**A real message has been sent.** `POST /send` to a real phone answered
+`{ok: true, messageId: "spc-msg-…"}`, through the relay and again through
+FastAPI's `/api/send` with the contact resolved from `contacts.json`.
 
-Also unknown: whether holding one Spectrum app open and sending into it per
-HTTP request behaves over hours rather than over one call.
+Before the account had a phone connected, the same send was refused with
+`[spectrum-imessage] Target not allowed for this project` — no code, no hint
+which setup step was missing, which is why `explainError` names both.
+
+One trap: `project.profile.imessageSynced` stays `false` on an account that
+sends perfectly well, so it is **not** a send gate. Health reports it and
+stays green; an earlier version of this file failed health on it and would
+have called a working setup broken.
+
+Still unknown: whether holding one Spectrum app open and sending into it per
+HTTP request behaves over hours rather than over a handful of calls, and
+whether delivery (as opposed to acceptance) ever reports back.
 
 ## Tests
 

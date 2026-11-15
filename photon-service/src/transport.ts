@@ -211,10 +211,9 @@ export function explainError(error: unknown, to: string): string {
   // and it arrives as prose rather than as a code.
   const message = describe(error);
   if (/inbound|has not messaged|no conversation/i.test(message)) return inboundRequired(to);
-  // Observed live, from `space.send`, against a project whose account had no
-  // phone connected: "[spectrum-imessage] Target not allowed for this
-  // project". Photon does not say which of the two reasons it is, so the
-  // message names both.
+  // Observed live from `space.send`: "[spectrum-imessage] Target not allowed
+  // for this project", before the account had a phone connected. Photon does
+  // not say which of the two reasons it is, so the message names both.
   if (/target not allowed/i.test(message)) {
     return (
       `Photon will not send to ${to} yet. Two things have to be true: your ` +
@@ -298,17 +297,6 @@ export function createSpectrumTransport(config: SpectrumConfig): MessageTranspor
         project = await cloud.getProject(projectId, projectSecret);
         // Reachable with no iMessage line is not healthy: nothing can be
         // sent, and it is a setup mistake worth naming before a demo.
-        // Observed: with no phone connected to the account this is false,
-        // every send comes back "Target not allowed for this project", and
-        // nothing else says why. Better to fail here than at the demo.
-        if (project?.profile?.imessageSynced === false) {
-          return {
-            ok: false,
-            detail:
-              "this Photon account has no phone connected, so the project " +
-              "cannot send yet. Add one from the avatar menu in the dashboard.",
-          };
-        }
         if (cloud.issueImessageTokens) {
           const tokens = await cloud.issueImessageTokens(projectId, projectSecret);
           const kind = tokens?.type;
@@ -320,7 +308,14 @@ export function createSpectrumTransport(config: SpectrumConfig): MessageTranspor
                 "dashboard (Platforms -> iMessage).",
             };
           }
-          return { ok: true, detail: `Photon reachable; ${kind} iMessage line on ${project?.name ?? projectId}` };
+          // `profile.imessageSynced` is NOT a send gate: a real send went
+          // through with it false. It is reported, never acted on - health
+          // must not refuse a setup that works.
+          const synced = project?.profile?.imessageSynced === false ? "; profile not synced" : "";
+          return {
+            ok: true,
+            detail: `Photon reachable; ${kind} iMessage line on ${project?.name ?? projectId}${synced}`,
+          };
         }
       } catch (error) {
         return { ok: false, detail: `Photon unreachable: ${explainError(error, "this project")}` };
