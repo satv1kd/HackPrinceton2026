@@ -68,5 +68,8 @@ fi
 
 # Exec would discard the trap, so run in the foreground and wait instead.
 "$UVICORN" app.main:app --reload --host 0.0.0.0 --port "$PORT" &
-PIDS+=($!)
-wait -n
+SERVER_PID=$!
+PIDS+=("$SERVER_PID")
+# Plain `wait <pid>`, not `wait -n`: macOS ships bash 3.2, which lacks -n.
+# The server is the process that matters; Ctrl+C triggers the cleanup trap.
+wait "$SERVER_PID"
