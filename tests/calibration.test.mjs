@@ -1,0 +1,205 @@
+/* The calibration card: record the whole sentence, then press "I've read it".
+
+   The live word-by-word highlight is gone on purpose, so these tests also
+   stand guard over its absence: no word spans, and no key that moves a cursor. */
+
+import { test, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { CalibrationFlow, savedMessage } from '../static/js/calibration/flow.js';
+import { extensionFor } from '../static/js/calibration/api.js';
+
+const PASSAGE = [
+  { id: 's01', text: 'The sun rose over the quiet harbor.' },
+  { id: 's02', text: 'A pot of fresh coffee smells good.' },
+];
+
+let dom, flow, api, recorder, saves;
+
+class FakeRecorder {
+  constructor() { this.started = null; this.cancelled = false; }
+  start(onStarted) {
+    onStarted();
+    return new Promise(resolve => { this.finish = resolve; });
+  }
+  stop() { this.finish?.({ blob: new Blob(['audio']), duration: 2000, mimeType: 'audio/webm' }); }
+  cancel() { this.cancelled = true; this.finish?.(null); }
+}
+
+const record = (id, placed, total) => ({
+  id, text: 'x', recorded_at: 'now', duration_sec: 2.0, transcript: 't',
+  placed_count: placed, word_count: total, words: [],
+});
+
+beforeEach(() => {
+  dom = new JSDOM(readFileSync(new URL('../static/calibrate.html', import.meta.url)),
+    { url: 'http://localhost/' });
+  globalThis.document = dom.window.document;
+  globalThis.Element = dom.window.Element;
+  globalThis.Blob = dom.window.Blob;
+  saves = [];
+  api = {
+    list: async () => [],
+    save: async payload => { saves.push(payload); return record(payload.id, 7, 7); },
+    audioUrl: id => `/api/calibration/sentences/${id}/audio`,
+  };
+  recorder = new FakeRecorder();
+  flow = new CalibrationFlow({
+    doc: dom.window.document, passage: PASSAGE, api,
+    makeRecorder: () => recorder,
+    makeMonitor: () => ({ start: async () => {}, stop() {} }),
+    autoAdvanceMs: 5000,
+  }).attach();
+});
+
+afterEach(() => {
+  clearTimeout(flow.autoTimer);
+  dom.window.close();
+});
+
+const $ = id => dom.window.document.getElementById(id);
+
+test('the page opens on the intro, not on a recording', () => {
+  assert.equal($('screen-intro').hidden, false);
+  assert.equal($('screen-read').hidden, true);
+  assert.equal(flow.state, 'ready');
+});
+
+test('the mic check only unlocks Start reading once it has heard something', async () => {
+  await flow.beginMicCheck();
+  assert.equal($('screen-mic').hidden, false);
+  assert.equal($('mic-continue').disabled, true);
+  flow.onLevel(0.4, true, 400);
+  assert.equal($('mic-continue').disabled, true);   // 400ms is not enough yet
+  flow.onLevel(0.4, true, 400);
+  assert.equal($('mic-continue').disabled, false);
+  assert.match($('mic-status').textContent, /we can hear you/i);
+});
+
+test('a card shows the sentence as one piece, with no per-word markup', () => {
+  flow.startSentence(0);
+  assert.equal($('sentence').textContent, PASSAGE[0].text);
+  assert.equal($('sentence').querySelectorAll('span').length, 0);
+  assert.equal($('read-count').textContent, 'Sentence 1 of 2');
+});
+
+test('recording starts on the button and ends on "I\'ve read it"', async () => {
+  flow.startSentence(0);
+  assert.equal($('record-btn').hidden, false);
+  assert.equal($('done-btn').hidden, true);
+
+  const recording = flow.startRecording();
+  assert.equal(flow.state, 'recording');
+  assert.equal($('record-btn').hidden, true);
+  assert.equal($('done-btn').hidden, false);
+  assert.equal($('rec-dot').hidden, false);
+
+  flow.finishReading();
+  await recording;
+  assert.deepEqual(saves.map(s => [s.id, s.text]), [['s01', PASSAGE[0].text]]);
+  assert.equal(flow.state, 'saved');
+  assert.match($('rec-label').textContent, /all 7 words lined up/);
+  assert.equal($('rec-dot').hidden, true);
+});
+
+test('arrow keys and taps on the sentence do nothing at all', async () => {
+  flow.startSentence(0);
+  const before = $('sentence').outerHTML;
+  for (const key of ['ArrowRight', 'ArrowLeft']) {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true }));
+  }
+  $('sentence').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  assert.equal($('sentence').outerHTML, before);
+  assert.equal(flow.state, 'ready');
+});
+
+test('space starts the recording, then finishes it', async () => {
+  flow.startSentence(0);
+  const press = () => dom.window.document.dispatchEvent(
+    new dom.window.KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+  press();
+  assert.equal(flow.state, 'recording');
+  press();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(flow.state, 'saved');
+});
+
+test('a failed save keeps the card where it is and says so', async () => {
+  api.save = async () => { throw new Error('ffmpeg is not installed'); };
+  flow.startSentence(0);
+  const recording = flow.startRecording();
+  flow.finishReading();
+  await recording;
+  assert.equal(flow.state, 'ready');
+  assert.equal($('rec-label').textContent, 'ffmpeg is not installed');
+  assert.equal($('record-btn').hidden, false);     // ready to try again
+  assert.equal(flow.cursor, 0);                    // never pushed past it
+});
+
+test('skipping moves on without saving, mid-recording or before it', async () => {
+  flow.startSentence(0);
+  flow.skipSentence();
+  assert.equal(flow.cursor, 1);
+  assert.equal(saves.length, 0);
+
+  const recording = flow.startRecording();
+  flow.skipSentence();                  // half way through a take
+  await recording;
+  assert.equal(recorder.cancelled, true);
+  assert.equal(saves.length, 0);
+});
+
+test('pausing cancels the take and offers Resume', async () => {
+  flow.startSentence(0);
+  const recording = flow.startRecording();
+  flow.pauseReading();
+  await recording;
+  assert.equal($('paused-panel').hidden, false);
+  assert.equal(recorder.cancelled, true);
+  assert.equal(saves.length, 0);
+});
+
+test('the finish screen counts sentences and the words that were cut', async () => {
+  flow.saved.set('s01', record('s01', 7, 7));
+  flow.saved.set('s02', record('s02', 4, 7));
+  flow.buildFinish();
+  assert.equal($('screen-finish').hidden, false);
+  assert.match($('finish-summary').textContent, /2 of 2 sentences recorded, 11 of 14 words/);
+  const rows = $('finish-list').querySelectorAll('li');
+  assert.equal(rows.length, 2);
+  assert.match(rows[1].textContent, /4 of 7 words/);
+  // Play and Re-record on a recorded sentence; Record on one that has none.
+  assert.deepEqual([...rows[0].querySelectorAll('button')].map(b => b.textContent),
+    ['Play', 'Re-record']);
+  flow.saved.delete('s02');
+  flow.buildFinish();
+  assert.deepEqual([...$('finish-list').querySelectorAll('li')[1]
+    .querySelectorAll('button')].map(b => b.textContent), ['Record']);
+});
+
+test('re-recording one sentence from the finish list returns to the finish list', async () => {
+  flow.saved.set('s01', record('s01', 7, 7));
+  flow.buildFinish();
+  $('finish-list').querySelectorAll('li')[1].querySelector('button').click();
+  assert.equal(flow.cursor, 1);
+  assert.equal($('screen-read').hidden, false);
+  const recording = flow.startRecording();
+  flow.finishReading();
+  await recording;
+  flow.advance();
+  assert.equal($('screen-finish').hidden, false);
+});
+
+test('what the reader is told never blames them', () => {
+  assert.equal(savedMessage({ placed_count: 7, word_count: 7 }), 'Saved — all 7 words lined up.');
+  assert.equal(savedMessage({ placed_count: 3, word_count: 7 }), 'Saved — 3 of 7 words lined up.');
+  assert.match(savedMessage({ placed_count: 0, word_count: 7 }), /recording is still kept/);
+  assert.equal(savedMessage({ placed_count: 0, word_count: 0 }), 'Saved.');
+});
+
+test('the upload is named for what the browser actually recorded', () => {
+  assert.equal(extensionFor('audio/webm;codecs=opus'), 'webm');
+  assert.equal(extensionFor('audio/mp4'), 'm4a');      // iPhone Safari
+  assert.equal(extensionFor(''), 'webm');
+});

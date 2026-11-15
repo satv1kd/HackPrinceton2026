@@ -42,6 +42,7 @@ data/images/
 data/tts_cache/
 data/profile/
 data/lexicon/
+data/calibration/
 data/contacts.json
 data/feedback.jsonl
 data/phrases.json

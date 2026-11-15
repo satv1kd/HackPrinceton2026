@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from app.config import get_settings
 from app.services.audio import AudioPreprocessor
+from app.services.calibration import CalibrationStore
 from app.services.features import FeatureCache, get_extractor
 from app.services.preferences import PhoneticReadiness, Preferences, PreferenceStore
 from app.services.storage import PhraseStore
@@ -18,6 +19,20 @@ def get_store() -> PhraseStore:
 @lru_cache
 def get_preprocessor() -> AudioPreprocessor:
     return AudioPreprocessor.from_settings(get_settings())
+
+
+@lru_cache
+def get_calibration_preprocessor() -> AudioPreprocessor:
+    """Same cleaning as a Talk recording, with room for a whole sentence read
+    slowly: MAX_CLIP_SEC is sized for a short phrase."""
+    settings = get_settings()
+    return AudioPreprocessor(settings.TRIM_TOP_DB, settings.MIN_CLIP_SEC,
+                             settings.CALIBRATION_MAX_CLIP_SEC)
+
+
+@lru_cache
+def get_calibration_store() -> CalibrationStore:
+    return CalibrationStore(get_settings().DATA_DIR)
 
 
 @lru_cache
@@ -46,5 +61,6 @@ def get_stt_backend() -> FasterWhisperBackend:
 def reset_caches() -> None:
     """Forget all singletons (used by tests that change settings)."""
     for fn in (get_settings, get_store, get_preprocessor, get_feature_cache,
-               get_preference_store, get_phonetic_readiness, get_stt_backend):
+               get_preference_store, get_phonetic_readiness, get_stt_backend,
+               get_calibration_preprocessor, get_calibration_store):
         fn.cache_clear()

@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     TRIM_TOP_DB: float = 20
     MIN_CLIP_SEC: float = 0.3
     MAX_CLIP_SEC: float = 10.0
+    # A calibration sentence is a whole sentence read at the reader's own
+    # pace, so it gets a far longer ceiling than a Talk phrase.
+    CALIBRATION_MAX_CLIP_SEC: float = 45.0
 
     # --- Phonetic engine (PRD F6). Numeric defaults are starting points; the
     # evaluation task (34) replaces them with measured values.

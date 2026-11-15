@@ -40,7 +40,7 @@
       <ul class="plain-facts">
         <li>Nothing is graded. There is no wrong way to sound.</li>
         <li>You can pause, skip a sentence, or stop at any time.</li>
-        <li>Recordings stay on this device. Nothing is uploaded.</li>
+        <li>Recordings go only to Heard running on your own machine.</li>
       </ul>
       <div class="actions">
         <button id="begin-btn" class="btn btn-primary">Begin — check my microphone</button>
@@ -93,11 +93,11 @@
       </div>
 
       <p id="sentence" class="sentence" tabindex="0"
-         aria-description="Use the right arrow key to move the highlight forward. Nothing here can be wrong."></p>
+         aria-description="Read this sentence aloud. Nothing here can be wrong."></p>
 
       <p class="read-hint">
-        Read at your own pace. If the highlight falls behind, tap a word or press
-        <kbd>→</kbd> — it’s a bookmark, not a test.
+        Read the whole sentence at your own pace, then press
+        <strong>I’ve read it</strong>. Nothing is following along as you go.
       </p>
 
       <div id="paused-panel" class="notice" hidden>
@@ -108,8 +108,9 @@
       </div>
 
       <div class="read-actions">
-        <button id="done-btn" class="btn btn-primary">I’ve read it</button>
-        <button id="redo-btn" class="btn btn-ghost">Start this one over</button>
+        <button id="record-btn" class="btn btn-primary">Start recording</button>
+        <button id="done-btn" class="btn btn-primary" hidden>I’ve read it</button>
+        <button id="redo-btn" class="btn btn-ghost" hidden>Start this one over</button>
         <button id="skip-btn" class="btn btn-ghost">Skip this sentence</button>
       </div>
 
@@ -122,9 +123,10 @@
       <h1 id="finish-title" class="display">Thank you for<br><em>lending your voice.</em></h1>
       <p class="lede" id="finish-summary"></p>
       <p class="lede quiet">
-        Honest note: these recordings live only on this device for now. They’re
-        the raw material for the sound-level learning we’re building — Heard
-        doesn’t learn from them automatically yet.
+        Honest note: these recordings stay with Heard on your own machine. Each
+        sentence is cut into one clip per word — raw material for the
+        sound-level learning we’re building. Heard doesn’t learn from them
+        automatically yet.
       </p>
       <ol id="finish-list" class="finish-list"></ol>
       <div class="actions">
