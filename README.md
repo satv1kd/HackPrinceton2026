@@ -43,8 +43,8 @@ data/                   Runtime data: phrases, recordings, caches (gitignored, c
 
 ```bash
 # From the repo root, on macOS with Homebrew
-brew install python@3.13 ffmpeg node cloudflared   # skips anything already installed
-make install                                       # Python environment in .venv
+make setup                                         # installs only missing tools; never upgrades
+make install                                       # Python environment in .venv (rebuilt if broken)
 [ -f .env ] || cp .env.example .env                # settings file (keeps an existing one)
 make dev-all                                       # server + HTTPS tunnel + iMessage relay
 ```
@@ -52,6 +52,8 @@ make dev-all                                       # server + HTTPS tunnel + iMe
 Open the `https://…trycloudflare.com` URL it prints on your phone, or http://localhost:8000 on your laptop. Stop with `Ctrl+C`. The sections below explain each step.
 
 ### Prerequisites
+
+`make setup` (`scripts/setup.sh`) installs whichever of these are missing, using Homebrew, and is safe to run repeatedly. Avoid re-running a plain `brew install python@3.13 …` instead: when Python is already installed, it *upgrades* it, and Homebrew's cleanup then deletes the exact Python build `.venv` was made from. If that ever happens, `make install` notices and rebuilds `.venv` (then re-run `make install-stt` if you use speech-to-text).
 
 - **Python 3.13 or older.** librosa and numba don't support 3.14+ yet. `make install` uses `python3.13`; override with `make install PYTHON=python3.12`.
 - **ffmpeg:** `brew install ffmpeg`. Without it, every recording fails with "Didn't catch that".

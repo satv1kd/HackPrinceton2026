@@ -1,9 +1,18 @@
 PYTHON ?= python3.13
 
-.PHONY: install install-stt dev dev-tunnel dev-all photon test test-client test-all
+.PHONY: setup install install-stt dev dev-tunnel dev-all photon test test-client test-all
 
+# System tools (python 3.13, ffmpeg, node, cloudflared). Installs only what is
+# missing and never upgrades, so it is safe to re-run.
+setup:
+	./scripts/setup.sh
+
+# Rebuilds .venv when its Python is gone (e.g. Homebrew upgraded python@3.13
+# and cleaned up the old build), otherwise reuses it.
 install:
-	$(PYTHON) -m venv .venv
+	@if [ -d .venv ] && ! .venv/bin/python -c 'import sys' >/dev/null 2>&1; then \
+		echo "[install] .venv's Python no longer exists; rebuilding .venv (re-run make install-stt if you use it)"; rm -rf .venv; fi
+	@[ -d .venv ] || $(PYTHON) -m venv .venv
 	.venv/bin/pip install -r requirements-dev.txt
 
 # Optional: local speech-to-text (faster-whisper), the fallback when no saved
