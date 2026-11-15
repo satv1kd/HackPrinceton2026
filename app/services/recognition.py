@@ -95,22 +95,30 @@ class RecognitionService:
 def merge_unconfident(results: List[StageResult]) -> List[MatchCandidate]:
     """Order candidates when no stage was confident.
 
-    Saved phrases that DTW found *plausible* (best distance within
-    ABSOLUTE_MAX) come first: a near-miss on the user's own recording is
-    usually a better bet than a transcript. When DTW found nothing believable,
-    the generated stages' candidates lead, in cascade order (phonetic before
-    speech-to-text), followed by DTW's long shots. Duplicates are dropped -
-    the same saved phrase found by DTW and by speech-to-text appears once,
-    in its first position.
+    1. Saved phrases that a generated stage *also* identified (e.g. the
+       transcript matched the phrase text) lead: two independent recognizers
+       agree.
+    2. If DTW found its best phrase *plausible* (within ABSOLUTE_MAX), that
+       phrase comes next, then the generated stages' best text, then DTW's
+       other phrases. Interleaving guarantees the transcript is never pushed
+       out of the top 3 by DTW near-misses.
+    3. Otherwise the generated text leads (cascade order: phonetic before
+       speech-to-text), followed by DTW's long shots.
+
+    Duplicates are dropped - the same saved phrase found by DTW and by
+    speech-to-text appears once, in its first position.
     """
     phrase = [r for r in results if r.stage == 'phrase']
     others = [r for r in results if r.stage != 'phrase']
     phrase_candidates = [c for r in phrase for c in r.candidates]
     other_candidates = [c for r in others for c in r.candidates]
-    if any(r.plausible for r in phrase):
-        ordered = phrase_candidates + other_candidates
+    corroborated = [c for c in other_candidates if c.type == 'phrase']
+    other_candidates = [c for c in other_candidates if c.type != 'phrase']
+    if any(r.plausible for r in phrase) and phrase_candidates:
+        ordered = (corroborated + phrase_candidates[:1] + other_candidates[:1]
+                   + phrase_candidates[1:] + other_candidates[1:])
     else:
-        ordered = other_candidates + phrase_candidates
+        ordered = corroborated + other_candidates + phrase_candidates
     seen, merged = set(), []
     for candidate in ordered:
         key = (('phrase', candidate.phrase_id) if candidate.type == 'phrase' and candidate.phrase_id

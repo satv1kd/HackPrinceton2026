@@ -120,11 +120,19 @@ def test_requires_a_stage(tmp_path):
 
 # -- merge rule ------------------------------------------------------------
 
-def test_merge_plausible_phrases_first_and_dedupes():
+def test_merge_corroborated_phrase_first_and_dedupes():
     dtw = StageResult("phrase", [phrase("water", 0.4), phrase("coffee", 0.6)], plausible=True)
     stt = StageResult("stt", [phrase("water", 0.1, source="stt"), generated("Water please")])
     merged = merge_unconfident([dtw, stt])
-    assert [(c.phrase_id, c.source) for c in merged] == [("water", "phrase"), ("coffee", "phrase"), (None, "stt")]
+    # Transcript and DTW agree on "water"; DTW's duplicate is dropped.
+    assert [(c.phrase_id, c.source) for c in merged] == [("water", "stt"), (None, "stt"), ("coffee", "phrase")]
+
+
+def test_merge_never_drops_transcript_behind_plausible_phrases():
+    dtw = StageResult("phrase", [phrase("a", 0.2), phrase("b", 0.3), phrase("c", 0.4)], plausible=True)
+    stt = StageResult("stt", [generated("hello there")])
+    merged = merge_unconfident([dtw, stt])
+    assert [c.text for c in merged] == ["A", "hello there", "B"]
 
 
 def test_merge_caps_at_three_and_dedupes_text():

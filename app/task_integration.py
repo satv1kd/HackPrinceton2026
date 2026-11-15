@@ -10,7 +10,7 @@ from app.services.attempts import AttemptStore
 from app.services.feedback import FeedbackStore
 from app.services.matcher import DTWMatcher
 from app.services.recognition import RecognitionService
-from app.services.recognition_stages import PhraseMatchStage
+from app.services.recognition_stages import PhraseMatchStage, SpeechToTextStage
 
 
 def foundation_services():
@@ -31,7 +31,9 @@ def build_extra_stages(dependencies):
     reports itself unavailable when its optional dependencies are missing,
     so building them here is always safe.
     """
-    return []
+    from app.deps import get_stt_backend
+    return [SpeechToTextStage.from_settings(dependencies['config'], get_stt_backend(),
+                                            dependencies['phrase_store'])]
 
 
 def install_tasks_5_8(app, *, services_factory=None, **services):

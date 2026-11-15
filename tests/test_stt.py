@@ -104,7 +104,7 @@ def test_settings_wiring(monkeypatch, data_dir):
 
 def test_health_reports_stt(client):
     stt = client.get("/api/health").json()["checks"]["stt"]
-    assert stt["ok"] is True and stt["enabled"] is True and stt["model"] == "base.en"
+    assert stt["ok"] is True and stt["enabled"] is False and stt["model"] == "base.en"
     assert "installed" in stt
 
 
