@@ -1,6 +1,7 @@
 """Connect recognition/feedback to the foundation's shared service instances."""
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from starlette.concurrency import run_in_threadpool

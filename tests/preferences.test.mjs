@@ -18,7 +18,7 @@ async function boot(server) {
     requests.push({ url, method: options.method || 'GET', body: options.body });
     return server(url, options);
   };
-  dom = new JSDOM(readFileSync(new URL('../static/index.html', import.meta.url)), { url: 'http://localhost/' });
+  dom = new JSDOM(readFileSync(new URL('../static/app.html', import.meta.url)), { url: 'http://localhost/' });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.CustomEvent = dom.window.CustomEvent;

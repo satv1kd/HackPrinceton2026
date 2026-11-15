@@ -28,6 +28,10 @@ class MatchResult(BaseModel):
     #: Recognizer behind the first candidate ('phrase' when nothing matched).
     stage: CandidateSource = 'phrase'
     phonetic_mode: bool = False
+    #: What local speech-to-text heard, verbatim (None when unavailable).
+    #: Distinct from the candidates: a candidate may be a saved phrase
+    #: substituted for these words, and the user deserves to see both.
+    transcript: str | None = None
 
 
 class PhraseLabel(BaseModel):

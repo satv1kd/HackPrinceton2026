@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161e24">
+  <title>About — Heard</title>
+  <meta name="description" content="Why we're building Heard, and the rules we hold ourselves to.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..640;1,9..144,340..640&family=Inter+Tight:wght@380..680&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header>
+    <nav class="site-nav" aria-label="Site">
+      <a class="brand" href="/"><span aria-hidden="true">◖</span>heard<span class="brand-dot">.</span></a>
+      <div class="nav-links">
+        <a href="/how-it-works">How it works</a>
+        <a href="/calibrate">Calibration</a>
+        <a href="/about" aria-current="page">About</a>
+        <a href="/app">Open the app</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main" class="page">
+    <div class="page-head">
+      <p class="eyebrow">About</p>
+      <h1 class="display">The software is wrong.<br><em>Never the person.</em></h1>
+    </div>
+
+    <div class="prose">
+      <p>
+        Heard started with a simple observation at a hackathon table: the
+        people who would benefit most from voice technology are the people it
+        serves worst. Dictation that types nonsense. Assistants that answer a
+        question nobody asked. The quiet arithmetic of deciding it’s easier
+        not to speak.
+      </p>
+      <p>
+        Every design decision in Heard follows from one rule:
+        <strong>when recognition fails, that is the software’s failure.</strong>
+        So the app never says “try again”, never scores anyone’s speech, and
+        never acts on a guess without a yes. The reading screen can’t show an
+        error, because we didn’t build one.
+      </p>
+
+      <h2>The rules we hold ourselves to</h2>
+      <ul>
+        <li><strong>Honesty about capability.</strong> What works is on <a href="/how-it-works">the how-it-works page</a>; what doesn’t work yet is labeled as such, everywhere, every time.</li>
+        <li><strong>The person sets the pace.</strong> No time limits, no auto-anything that can’t be overridden, targets big enough for unsteady hands.</li>
+        <li><strong>Voice data is personal.</strong> Recordings stay on the device. No account, no upload, no quiet telemetry.</li>
+      </ul>
+
+      <h2>Who we are</h2>
+      <p>
+        A small student team building Heard at <strong>HackPrinceton 2026</strong>.
+        We’re not speech-language pathologists, and we’d rather borrow the
+        expertise of people who are — if that’s you, or if Heard is for
+        someone you love, we genuinely want to hear what we got wrong.
+      </p>
+      <p class="quiet">
+        This is a prototype built in a weekend. It will have rough edges; it
+        won’t have dishonest ones.
+      </p>
+    </div>
+
+    <section class="cta" aria-labelledby="cta3">
+      <h2 class="display" id="cta3">Lend us <em>your voice.</em></h2>
+      <div class="actions">
+        <a class="btn btn-primary" href="/calibrate">Start calibration</a>
+        <a class="text-button" href="/">Back to home</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Heard — built at HackPrinceton 2026.</span>
+    <div class="foot-links">
+      <a href="/">Home</a>
+      <a href="/how-it-works">How it works</a>
+      <a href="/app">The app</a>
+    </div>
+  </footer>
+</body>
+</html>

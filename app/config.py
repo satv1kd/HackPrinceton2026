@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     STT_PHRASE_MATCH_MIN: float = 85.0
     # Segments faster-whisper marks as more likely silence than speech.
     STT_NO_SPEECH_MAX: float = 0.6
+    # Measured on a 12-thread laptop CPU, per ~2 s clip:
+    #   base.en,  4 threads, greedy  ~1.2 s   (this default)
+    #   small.en, 4 threads, greedy  ~3.7 s   (try if accuracy falls short)
+    # More threads was slower, not faster: the 30 s encoder pass dominates.
+    STT_CPU_THREADS: int = 4
 
     @property
     def phoneme_cache_dir(self) -> Path:

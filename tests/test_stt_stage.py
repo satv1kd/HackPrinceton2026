@@ -23,8 +23,9 @@ class FakeBackend:
     def is_available(self):
         return self._available
 
-    def transcribe(self, audio, sr):
+    def transcribe(self, audio, sr, vocabulary=None):
         self.calls += 1
+        self.vocabulary = list(vocabulary or [])
         return self.transcript
 
 
@@ -71,6 +72,12 @@ def test_threshold_boundary():
     assert just_below.run(ctx()).candidates[0].type == "generated"
     at = SpeechToTextStage(FakeBackend("I want wader"), Phrases(("w", "I want water")), phrase_match_min=91)
     assert at.run(ctx()).candidates[0].type == "phrase"
+
+
+def test_saved_phrases_are_passed_as_a_vocabulary_hint():
+    s = stage("Wawa.", ("ww", "wawa"), ("c", "Coffee please"))
+    s.run(ctx())
+    assert s.backend.vocabulary == ["wawa", "Coffee please"]
 
 
 def test_personal_word_matches_too():

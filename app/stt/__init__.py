@@ -25,13 +25,27 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Protocol
+from typing import Iterable, List, Optional, Protocol
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
+
+#: Phrases Whisper emits when it is fed near-silence. Dropped only when the
+#: no-speech probability agrees, so a user who really did say "okay" keeps it.
+HALLUCINATIONS = frozenset({
+    "you", "thank you", "thanks for watching", "thank you for watching",
+    "bye", "okay", "so", "uh", "um", "hmm",
+})
+#: ``initial_prompt`` is a vocabulary hint, not a transcript: past a few
+#: hundred characters it starts competing with the audio.
+MAX_PROMPT_CHARS = 400
+#: Mean token log-prob below which the decode is guesswork.
+MIN_AVG_LOGPROB = -1.2
+#: Above this, the segment is more likely silence than speech.
+MAX_NO_SPEECH_PROB = 0.6
 
 
 class SpeechToTextError(RuntimeError):
@@ -64,11 +78,55 @@ class Transcript:
     def is_empty(self) -> bool:
         return not self.text.strip()
 
+    @property
+    def usable(self) -> bool:
+        """Worth showing the user at all.
+
+        Whisper never returns "I did not hear anything": on silence or noise it
+        returns a confident-looking stock phrase. The log-prob and no-speech
+        numbers are how we tell those apart.
+        """
+        cleaned = self.text.strip().strip(".!?,").strip().lower()
+        if not cleaned:
+            return False
+        if (self.no_speech_prob or 0.0) > MAX_NO_SPEECH_PROB:
+            return False
+        if self.avg_logprob is not None and self.avg_logprob < MIN_AVG_LOGPROB:
+            return False
+        if cleaned in HALLUCINATIONS and (self.no_speech_prob or 0.0) > 0.3:
+            return False
+        return True
+
 
 class SpeechToTextBackend(Protocol):
     def is_available(self) -> bool: ...
 
-    def transcribe(self, audio: np.ndarray, sr: int) -> Transcript: ...
+    def transcribe(self, audio: np.ndarray, sr: int,
+                   vocabulary: Optional[Iterable[str]] = None) -> Transcript: ...
+
+
+def build_prompt(phrases: Iterable[str]) -> Optional[str]:
+    """Join the user's saved phrase texts into a short vocabulary hint.
+
+    Biases the decoder towards words this user actually says - names, places,
+    "nebulizer" - which is most of the accuracy win on a small model.
+    """
+    seen: set = set()
+    parts: List[str] = []
+    length = 0
+    for text in phrases:
+        text = " ".join(str(text).split())
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        if length + len(text) + 2 > MAX_PROMPT_CHARS:
+            break
+        seen.add(key)
+        parts.append(text)
+        length += len(text) + 2
+    if not parts:
+        return None
+    return ". ".join(parts) + "."
 
 
 def validate_audio(audio: np.ndarray, sr: int) -> np.ndarray:
@@ -102,9 +160,11 @@ def transcript_from_segments(segments, inference_sec: float = 0.0) -> Transcript
 
 class FasterWhisperBackend:
     def __init__(self, model_size: str = "base.en", device: str = "cpu",
-                 compute_type: str = "int8", offline: bool = False, download_root=None):
+                 compute_type: str = "int8", offline: bool = False, download_root=None,
+                 cpu_threads: int = 4):
         self.model_size, self.device, self.compute_type = model_size, device, compute_type
         self.offline, self.download_root = offline, download_root
+        self.cpu_threads = cpu_threads
         self._model = None
         self._load_lock = threading.Lock()
         # ctranslate2 models are not documented as safe for concurrent
@@ -115,7 +175,7 @@ class FasterWhisperBackend:
     @classmethod
     def from_settings(cls, settings) -> "FasterWhisperBackend":
         return cls(settings.STT_MODEL_SIZE, settings.STT_DEVICE, settings.STT_COMPUTE_TYPE,
-                   offline=settings.STT_OFFLINE)
+                   offline=settings.STT_OFFLINE, cpu_threads=settings.STT_CPU_THREADS)
 
     @staticmethod
     def package_installed() -> bool:
@@ -143,7 +203,8 @@ class FasterWhisperBackend:
             try:
                 self._model = WhisperModel(
                     self.model_size, device=self.device, compute_type=self.compute_type,
-                    download_root=self.download_root, local_files_only=self.offline)
+                    download_root=self.download_root, local_files_only=self.offline,
+                    cpu_threads=self.cpu_threads)
             except Exception as error:  # download/offline/corrupt-model errors vary
                 self._load_error = str(error)
                 raise SpeechToTextUnavailable(
@@ -151,13 +212,25 @@ class FasterWhisperBackend:
                     "Pre-download it with: python scripts/download_models.py --stt") from error
             log.info("loaded faster-whisper %s (%s/%s)", self.model_size, self.device, self.compute_type)
 
-    def transcribe(self, audio: np.ndarray, sr: int) -> Transcript:
+    def warm_up(self) -> None:
+        """Load the model and run one tiny decode, so the first real recording
+        does not pay for lazy initialisation (~1 s) on top of its own decode."""
+        self.load()
+        try:
+            self.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32), SAMPLE_RATE)
+        except SpeechToTextError as error:
+            log.warning("stt warm-up failed: %s", error)
+
+    def transcribe(self, audio: np.ndarray, sr: int,
+                   vocabulary: Optional[Iterable[str]] = None) -> Transcript:
         audio = validate_audio(audio, sr)
         self.load()
+        prompt = build_prompt(vocabulary) if vocabulary else None
         started = time.perf_counter()
         with self._run_lock:
             segments, _info = self._model.transcribe(
-                audio, language="en", beam_size=5, word_timestamps=True, vad_filter=True)
+                audio, language="en", beam_size=5, word_timestamps=True, vad_filter=True,
+                initial_prompt=prompt)
             # segments is a lazy generator: decoding happens while iterating.
             transcript = transcript_from_segments(segments)
         transcript.inference_sec = time.perf_counter() - started

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161e24">
+  <title>Heard — Your words, understood</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..640;1,9..144,340..640&family=Inter+Tight:wght@380..680&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#app">Skip to main content</a>
+  <header>
+    <nav class="site-nav" aria-label="Site">
+      <a class="brand" href="/"><span aria-hidden="true">◖</span>heard<span class="brand-dot">.</span></a>
+      <div class="nav-links">
+        <a href="/how-it-works">How it works</a>
+        <a href="/calibrate">Calibration</a>
+        <a href="/about">About</a>
+        <a href="/app" aria-current="page">The app</a>
+      </div>
+    </nav>
+  </header>
+  <main id="app">
+    <div class="mode-switch" role="tablist" aria-label="App mode">
+      <button id="talk-tab" role="tab" aria-selected="true" aria-controls="talk-mode">Talk</button>
+      <button id="setup-tab" role="tab" aria-selected="false" aria-controls="setup-mode" tabindex="-1">Setup</button>
+    </div>
+    <section id="talk-mode" role="tabpanel" aria-labelledby="talk-tab">
+      <p class="eyebrow">A little space to be heard</p>
+      <h1>What would you like to say?</h1>
+      <p class="intro" id="record-help">Hold the button while you speak. Release when you’re finished.</p>
+      <button id="talk-btn" class="talk-button" aria-describedby="record-help" aria-pressed="false">
+        <svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><rect x="17" y="5" width="14" height="26" rx="7" stroke="currentColor" stroke-width="3"/><path d="M10 23v2a14 14 0 0 0 28 0v-2M24 39v6M17 45h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <span class="label">Hold to talk</span>
+      </button>
+      <button id="toggle-record-btn" class="text-button">Or tap to start / stop</button>
+      <p id="listening-mode" class="listening-mode"></p>
+      <p id="talk-status" class="status" role="status" aria-live="polite">Ready when you are.</p>
+      <section id="result-card" class="result-card" aria-label="Recognition result" hidden>
+        <p id="result-heading" class="eyebrow">DID WE HEAR YOU RIGHT?</p>
+        <p id="result-text" class="result-text"></p>
+        <p id="heard-line" class="heard-line" hidden></p>
+        <!-- Shown once something has been said aloud; a tap, so Safari will play it. -->
+        <button id="replay-btn" class="replay-btn" type="button" hidden>🔊 Say it again</button>
+        <!-- Yes/No sits right under the answer; alternatives follow it. -->
+        <div id="feedback-buttons" class="feedback-buttons" hidden>
+          <button id="yes-btn" class="feedback-btn yes">✓ Yes, that’s right</button>
+          <button id="no-btn" class="feedback-btn no">✕ No</button>
+        </div>
+        <div id="candidate-list" class="candidate-list"></div>
+        <!-- Filled only after the result is confirmed; see talk.js. -->
+        <div id="send-buttons" class="send-buttons" hidden></div>
+      </section>
+      <p class="quiet-note">Take your time. Your voice belongs here.</p>
+    </section>
+    <section id="setup-mode" role="tabpanel" aria-labelledby="setup-tab" hidden>
+      <p class="eyebrow">Make it yours</p>
+      <h1>Your phrases</h1>
+      <p class="intro">Familiar words and everyday phrases, in your own voice.</p>
+      <p id="setup-status" role="status"></p>
+      <section id="listening-settings" class="listening-settings" aria-labelledby="listening-heading"></section>
+      <div id="phrase-list" class="phrase-list"></div>
+      <div id="setup-editor"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" hidden><span id="toast-message" role="status"></span><button id="toast-action" hidden>Undo</button></div>
+  <noscript>Heard needs JavaScript enabled to record your voice.</noscript>
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

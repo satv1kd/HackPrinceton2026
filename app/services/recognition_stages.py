@@ -135,12 +135,19 @@ class SpeechToTextStage:
         return True
 
     def run(self, ctx: RecognitionContext) -> StageResult:
-        transcript = self.backend.transcribe(ctx.audio, ctx.sr)
+        phrases = list(self.phrase_store.list_phrases())
+        # The user's own phrases bias the decoder towards the words they say
+        # (names, "nebulizer"), which is most of the accuracy win on base.en.
+        transcript = self.backend.transcribe(
+            ctx.audio, ctx.sr, vocabulary=[p.text for p in phrases])
         ctx.extras["transcript"] = transcript.text
-        if transcript.is_empty or (transcript.no_speech_prob or 0) > self.no_speech_max:
+        ctx.extras["transcript_words"] = transcript.words
+        # ``usable`` also rejects Whisper's stock phrases for silence; the
+        # no_speech ceiling stays configurable on top of it.
+        if not transcript.usable or (transcript.no_speech_prob or 0) > self.no_speech_max:
             return StageResult(self.name, [])
 
-        matches = self._phrase_matches(transcript.text, ctx)
+        matches = self._phrase_matches(transcript.text, ctx, phrases)
         candidates = [_phrase_candidate(phrase, score) for phrase, score in matches]
         exact = bool(matches) and matches[0][1] >= 100.0
         if not exact:
@@ -149,7 +156,7 @@ class SpeechToTextStage:
                 score=_logprob_score(transcript.avg_logprob)))
         return StageResult(self.name, candidates)
 
-    def _phrase_matches(self, text: str, ctx: RecognitionContext):
+    def _phrase_matches(self, text: str, ctx: RecognitionContext, phrases):
         from rapidfuzz import fuzz
 
         from app.services.recognition import normalize_text
@@ -157,7 +164,7 @@ class SpeechToTextStage:
         spoken = normalize_text(text)
         dtw_rank = _dtw_rank(ctx)
         scored = []
-        for phrase in self.phrase_store.list_phrases():
+        for phrase in phrases:
             target = normalize_text(phrase.text)
             if not target:
                 continue

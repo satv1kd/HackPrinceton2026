@@ -3,59 +3,153 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#173e38">
+  <meta name="theme-color" content="#161e24">
   <title>Heard — Your words, understood</title>
-  <link rel="stylesheet" href="/static/css/styles.css">
+  <meta name="description" content="Heard is a speech-assistance prototype for people whose voices standard recognition gets wrong. It learns your phrases, in your voice, and speaks them clearly.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..640;1,9..144,340..640&family=Inter+Tight:wght@380..680&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/site.css">
 </head>
 <body>
-  <a class="skip-link" href="#app">Skip to main content</a>
-  <header class="site-header">
-    <a class="brand" href="/" aria-label="Heard home"><span aria-hidden="true">◖</span> heard<span class="brand-dot">.</span></a>
-    <span class="tagline">Your words, understood.</span>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header>
+    <nav class="site-nav" aria-label="Site">
+      <a class="brand" href="/" aria-current="page"><span aria-hidden="true">◖</span>heard<span class="brand-dot">.</span></a>
+      <div class="nav-links">
+        <a href="/how-it-works">How it works</a>
+        <a href="/calibrate">Calibration</a>
+        <a href="/about">About</a>
+        <a href="/app">Open the app</a>
+      </div>
+    </nav>
   </header>
-  <main id="app">
-    <div class="mode-switch" role="tablist" aria-label="App mode">
-      <button id="talk-tab" role="tab" aria-selected="true" aria-controls="talk-mode">Talk</button>
-      <button id="setup-tab" role="tab" aria-selected="false" aria-controls="setup-mode" tabindex="-1">Setup</button>
-    </div>
-    <section id="talk-mode" role="tabpanel" aria-labelledby="talk-tab">
-      <p class="eyebrow">A LITTLE SPACE TO BE HEARD</p>
-      <h1>What would you like to say?</h1>
-      <p class="intro" id="record-help">Hold the button while you speak. Release when you’re finished.</p>
-      <button id="talk-btn" class="talk-button" aria-describedby="record-help" aria-pressed="false">
-        <svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><rect x="17" y="5" width="14" height="26" rx="7" stroke="currentColor" stroke-width="3"/><path d="M10 23v2a14 14 0 0 0 28 0v-2M24 39v6M17 45h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
-        <span class="label">Hold to talk</span>
-      </button>
-      <button id="toggle-record-btn" class="text-button">Or tap to start / stop</button>
-      <p id="listening-mode" class="listening-mode"></p>
-      <p id="talk-status" class="status" role="status" aria-live="polite">Ready when you are.</p>
-      <section id="result-card" class="result-card" aria-label="Recognition result" hidden>
-        <p id="result-heading" class="eyebrow">DID WE HEAR YOU RIGHT?</p>
-        <p id="result-text" class="result-text"></p>
-        <!-- Shown once something has been said aloud; a tap, so Safari will play it. -->
-        <button id="replay-btn" class="replay-btn" type="button" hidden>🔊 Say it again</button>
-        <div id="candidate-list" class="candidate-list"></div>
-        <div id="feedback-buttons" class="feedback-buttons" hidden>
-          <button id="yes-btn" class="feedback-btn yes">✓ Yes, that’s right</button>
-          <button id="no-btn" class="feedback-btn no">✕ No</button>
+
+  <main id="main" class="page">
+
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">For speech that machines get wrong</p>
+        <h1 class="display">Be heard,<br>in <em>your</em> voice.</h1>
+        <p class="lede">
+          Voice tech is trained on voices that sound nothing like everyone.
+          Heard starts from yours — the phrases you actually say, recorded the
+          way you actually say them — and speaks them clearly for the person
+          in front of you.
+        </p>
+        <div class="actions">
+          <a class="btn btn-primary" href="/calibrate">Start calibration — about 3 min</a>
+          <a class="text-button" href="/how-it-works">See how it works</a>
         </div>
-        <!-- Filled only after the result is confirmed; see talk.js. -->
-        <div id="send-buttons" class="send-buttons" hidden></div>
-      </section>
-      <p class="quiet-note">Take your time. Your voice belongs here.</p>
+        <p class="fine">A working prototype. No account. Recordings stay on your device.</p>
+      </div>
+
+      <div class="hero-visual" aria-hidden="true">
+        <div class="phone">
+          <div class="phone-screen">
+            <span class="phone-brand">◖ heard.</span>
+            <p class="phone-title">What would you like to say?</p>
+            <span class="phone-sub">Hold the button while you speak.</span>
+            <div class="phone-mic">
+              <svg viewBox="0 0 48 48" fill="none"><rect x="17" y="5" width="14" height="26" rx="7" stroke="currentColor" stroke-width="3"/><path d="M10 23v2a14 14 0 0 0 28 0v-2M24 39v6M17 45h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+              Hold to talk
+            </div>
+            <div class="phone-chip"><span>“Water, please.”</span><span class="ok">✓ Yes</span></div>
+          </div>
+        </div>
+      </div>
     </section>
-    <section id="setup-mode" role="tabpanel" aria-labelledby="setup-tab" hidden>
-      <p class="eyebrow">MAKE IT YOURS</p>
-      <h1>Your phrases</h1>
-      <p class="intro">Familiar words and everyday phrases, in your own voice.</p>
-      <section id="listening-settings" class="listening-settings" aria-labelledby="listening-heading"></section>
-      <p id="setup-status" role="status"></p>
-      <div id="phrase-list" class="phrase-list"></div>
-      <div id="setup-editor"></div>
+
+    <section class="band" aria-labelledby="problem-heading">
+      <p class="eyebrow" id="problem-heading">The problem</p>
+      <div>
+        <p class="pull">
+          Speech recognition was built on newsreader voices.
+          <em>Millions of people don’t sound like that — and never will.</em>
+        </p>
+        <p>
+          Cerebral palsy, a stroke, Down syndrome, ALS, stuttering — any of
+          these can put a voice outside what the big systems were trained on.
+          The result is familiar to anyone who lives it: you repeat yourself
+          three times, and the assistant plays the wrong song anyway.
+        </p>
+        <p>
+          <strong>Our position is simple: if Siri already understands you, you
+          don’t need us.</strong> Heard is for everyone else.
+        </p>
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="honest-heading">
+      <p class="eyebrow" id="honest-heading">Where we are</p>
+      <div class="now-next">
+        <div>
+          <h3><span class="tag">●</span> Working today</h3>
+          <ul>
+            <li><strong>Your phrase book.</strong> Save the things you say often — including your own words, like “wawa” for water — with a few recordings each.</li>
+            <li><strong>Talk mode.</strong> Hold a button and speak. Heard writes out what it heard, using a speech model that runs on the device itself, and checks it against <em>your</em> saved recordings, so personal words like “wawa” still come through.</li>
+            <li><strong>You confirm first.</strong> Unsure results come back as three big choices. Nothing is spoken for you until you tap yes.</li>
+            <li><strong>A clear voice out loud.</strong> Confirmed phrases are spoken aloud for the person you’re talking to.</li>
+          </ul>
+        </div>
+        <div class="soon">
+          <h3>Where we’re headed</h3>
+          <ul>
+            <li><strong>Learning your sounds, not just your phrases.</strong> The calibration reading on this site collects the material for that — today it records and stores; the learning isn’t live yet.</li>
+            <li><strong>New words, in your voice.</strong> Today, anything you haven’t recorded goes through a general-purpose speech model, the same kind that often struggles with atypical speech. Learning how <em>you</em> produce each sound is how we plan to close that gap. We’re not there yet, and we won’t pretend otherwise.</li>
+            <li><strong>Getting better as you use it.</strong> Every yes-or-no tap is honest training data for the versions ahead.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="steps-heading">
+      <p class="eyebrow" id="steps-heading">How it works</p>
+      <ol class="steps">
+        <li>
+          <div>
+            <h3>Read a short passage</h3>
+            <p>Ten small sentences, about three minutes, written to carry every
+            sound in English. You can pause, skip, or re-do any of them.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Say what you need</h3>
+            <p>In the app, hold the button and speak. Heard writes out the words it
+            heard and shows them back to you, with your closest saved phrases one
+            tap away.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Confirm, and be heard</h3>
+            <p>Tap yes and your phrase is spoken aloud, clearly. Tap no and you
+            choose the right one — which quietly makes next time better.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="cta" aria-labelledby="cta-heading">
+      <h2 class="display" id="cta-heading">Three minutes of reading. <em>A voice that’s yours.</em></h2>
+      <div class="actions">
+        <a class="btn btn-primary" href="/calibrate">Start calibration</a>
+        <a class="text-button" href="/app">Or open the app first</a>
+      </div>
     </section>
   </main>
-  <div id="toast" class="toast" hidden><span id="toast-message" role="status"></span><button id="toast-action" hidden>Undo</button></div>
-  <noscript>Heard needs JavaScript enabled to record your voice.</noscript>
-  <script type="module" src="/static/js/app.js"></script>
+
+  <footer class="site-footer">
+    <span>Heard — built at HackPrinceton 2026.</span>
+    <div class="foot-links">
+      <a href="/how-it-works">How it works</a>
+      <a href="/calibrate">Calibration</a>
+      <a href="/about">About</a>
+      <a href="/app">The app</a>
+    </div>
+  </footer>
 </body>
 </html>

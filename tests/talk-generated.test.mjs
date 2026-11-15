@@ -14,7 +14,7 @@ const stt = text => ({ type: 'generated', source: 'stt', phrase_id: null, text, 
 const saved = (id, text, extra = {}) => ({ type: 'phrase', source: 'phrase', phrase_id: id, text, emoji: '💧', score: 0.1, ...extra });
 
 beforeEach(async () => {
-  dom = new JSDOM(readFileSync(new URL('../static/index.html', import.meta.url)), { url: 'http://localhost/' });
+  dom = new JSDOM(readFileSync(new URL('../static/app.html', import.meta.url)), { url: 'http://localhost/' });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.CustomEvent = dom.window.CustomEvent;

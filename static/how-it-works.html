@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161e24">
+  <title>How it works — Heard</title>
+  <meta name="description" content="Plain words about what Heard does today, what the calibration reading is for, and what we have not built yet.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..640;1,9..144,340..640&family=Inter+Tight:wght@380..680&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header>
+    <nav class="site-nav" aria-label="Site">
+      <a class="brand" href="/"><span aria-hidden="true">◖</span>heard<span class="brand-dot">.</span></a>
+      <div class="nav-links">
+        <a href="/how-it-works" aria-current="page">How it works</a>
+        <a href="/calibrate">Calibration</a>
+        <a href="/about">About</a>
+        <a href="/app">Open the app</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main" class="page">
+    <div class="page-head">
+      <p class="eyebrow">How it works</p>
+      <h1 class="display">Plain words, <em>no magic.</em></h1>
+      <p class="lede">
+        This page says exactly what Heard does today, what the calibration
+        reading is for, and what we haven’t built yet. If a claim isn’t here,
+        we’re not making it.
+      </p>
+    </div>
+
+    <div class="prose">
+      <h2>1 · Your phrases, in your voice</h2>
+      <p>
+        In <a href="/app">the app</a>, you save the things you actually say —
+        “Water, please”, “I need the bathroom”, or your own words like
+        <em>wawa</em> — and record each one a few times. Heard checks everything
+        you say against those recordings.
+      </p>
+
+      <h2>2 · Two ways of listening</h2>
+      <p>
+        When you hold the talk button and speak, Heard does two things at once.
+        It <strong>writes out the words it heard</strong>, using a speech model
+        that runs on the device itself (nothing is sent to a cloud service). And
+        it compares the <strong>shape of the sound</strong> against your saved
+        recordings.
+      </p>
+      <p>
+        Usually the written-out words lead, so you can say anything, not just
+        what you’ve saved. When the words match one of your phrases, you get
+        that phrase with its picture. When the sound clearly matches a personal
+        word like <em>wawa</em>, that wins, because a general speech model can
+        spell “wawa” but can’t know it means water. Either way, the other good
+        guesses are one tap away, and choosing none is always allowed.
+      </p>
+      <p>
+        <strong>Honestly:</strong> the speech model is general-purpose, the same
+        kind of technology that often gets atypical speech wrong. It will
+        sometimes mishear you. That is why nothing is said until you confirm it.
+      </p>
+
+      <h2>3 · Nothing is said without you</h2>
+      <p>
+        A phrase is only spoken aloud — and can only be sent to anyone — after
+        you confirm it. “Yes” and “No” are two large buttons, every answer can
+        be undone for a few seconds, and a wrong guess from us never costs you
+        anything but a tap.
+      </p>
+
+      <h2>4 · The calibration reading</h2>
+      <p>
+        <a href="/calibrate">Calibration</a> asks you to read ten short
+        sentences that together contain every sound of English. While you
+        read, the words on screen fill in at your pace — tracked by speech
+        recognition when it cooperates, by the sound of your voice when it
+        doesn’t, and by a tap or an arrow key whenever you want. It never
+        marks you wrong, because you can’t be: it’s your voice.
+      </p>
+      <p>
+        <strong>Honestly:</strong> today those recordings are stored on your
+        device and nothing more. They’re the raw material for the next step —
+        learning how <em>you</em> produce each sound, so Heard can understand
+        words you never recorded. That part is being built; it is not live.
+      </p>
+
+      <h2>What we don’t do</h2>
+      <ul>
+        <li>No account, no cloud profile. Audio stays on the device running Heard.</li>
+        <li>No silent corrections — Heard never “fixes” your speech, it learns it.</li>
+        <li>No scores, streaks, or accuracy grades. You are not a dataset with feelings; you’re a person we work for.</li>
+      </ul>
+
+      <h2>Under the hood</h2>
+      <ul class="under-the-hood">
+        <li><span>Transcription</span><span>Whisper (base.en via faster-whisper) on the local CPU, nudged toward your saved phrases; silence and Whisper’s stock hallucinations are filtered out.</span></li>
+        <li><span>Matching</span><span>MFCC features compared with dynamic time warping against your sample recordings; confidence needs a clear margin before anything is called certain.</span></li>
+        <li><span>Reading tracker</span><span>Browser speech recognition, fuzzily aligned and forward-only; a voice-activity fallback paced by syllables; manual control that always wins.</span></li>
+        <li><span>Speaking</span><span>A natural synthesized voice when a key is configured, with the browser’s built-in voice as the fallback.</span></li>
+        <li><span>Storage</span><span>JSON and audio files on disk for the app; IndexedDB in your browser for calibration recordings.</span></li>
+        <li><span>Planned</span><span>A per-person phonetic profile learned from calibration and everyday yes/no taps. In progress, not shipped.</span></li>
+      </ul>
+
+      <p class="quiet" style="margin-top: 40px;">
+        Questions this page didn’t answer? That’s a gap, not a secret — ask us.
+      </p>
+    </div>
+
+    <section class="cta" aria-labelledby="cta2">
+      <h2 class="display" id="cta2">Ready when <em>you</em> are.</h2>
+      <div class="actions">
+        <a class="btn btn-primary" href="/calibrate">Start calibration</a>
+        <a class="text-button" href="/app">Open the app</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Heard — built at HackPrinceton 2026.</span>
+    <div class="foot-links">
+      <a href="/">Home</a>
+      <a href="/calibrate">Calibration</a>
+      <a href="/about">About</a>
+    </div>
+  </footer>
+</body>
+</html>

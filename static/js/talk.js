@@ -144,12 +144,15 @@ export class TalkMode {
     // the picker. Nothing unsure is spoken until the user confirms it.
     const single = confident || candidates.length === 1;
     feedback.hidden = !single || candidates.length === 0;
+    const heard = document.getElementById('heard-line');
+    if (heard) heard.hidden = true;
     if (!candidates.length) return;
     document.getElementById('result-heading').textContent = single ? 'DID WE HEAR YOU RIGHT?' : 'WHICH ONE DID YOU MEAN?';
     if (single) {
       text.replaceChildren(`${iconFor(candidates[0])} ${candidates[0].text}`);
       const badge = badgeFor(candidates[0]);
       if (badge) text.append(badge);
+      this.showHeardLine(heard, candidates[0]);
     } else {
       text.textContent = 'Tap the phrase you meant.';
       for (const candidate of candidates.slice(0, 3)) {
@@ -184,6 +187,23 @@ export class TalkMode {
   hideReplay() {
     this.spokenText = null;
     if (this.replayButton) this.replayButton.hidden = true;
+  }
+
+  /**
+   * Say what speech-to-text literally heard, when it differs from the answer.
+   *
+   * A saved phrase can lead because the user's "wawa" is enrolled as
+   * "I want water". Showing the raw transcript underneath is how the person
+   * sees *why* we picked it — without it, a substitution looks like the app
+   * ignoring them. Hidden when the two agree, which is most of the time.
+   */
+  showHeardLine(heard, candidate) {
+    const transcript = this.result?.transcript;
+    if (!heard || !transcript || candidate.type !== 'phrase') return;
+    const plain = value => value.trim().toLowerCase().replace(/[.!?,]/g, '');
+    if (plain(transcript) === plain(candidate.text)) return;
+    heard.textContent = `We heard “${transcript}”`;
+    heard.hidden = false;
   }
 
   /**
@@ -260,6 +280,8 @@ export class TalkMode {
         document.getElementById('result-heading').textContent = 'YOUR WORDS';
         document.getElementById('result-text').textContent = `${iconFor(candidate)} ${candidate.text}`;
         document.getElementById('candidate-list').replaceChildren();
+        const heardLine = document.getElementById('heard-line');
+        if (heardLine) heardLine.hidden = true;
         document.getElementById('feedback-buttons').hidden = true;
         document.getElementById('result-card').hidden = false;
         // Confirmed, so it is safe to say out loud and safe to send. Skip the

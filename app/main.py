@@ -52,6 +52,17 @@ install_tasks_5_8(app, services_factory=foundation_services)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/", include_in_schema=False)
-def index():
-    return FileResponse(STATIC_DIR / "index.html")
+# Site pages. "/" is the marketing home; the Talk/Setup prototype lives at
+# /app; /calibrate is the guided reading experience.
+PAGES = {
+    "/": "index.html",
+    "/app": "app.html",
+    "/calibrate": "calibrate.html",
+    "/how-it-works": "how-it-works.html",
+    "/about": "about.html",
+}
+
+for route, filename in PAGES.items():
+    def _serve(filename=filename):
+        return FileResponse(STATIC_DIR / filename)
+    app.get(route, include_in_schema=False)(_serve)
