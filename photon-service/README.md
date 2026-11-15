@@ -21,14 +21,20 @@ Without credentials it starts in **stub mode**: sends are logged, not
 delivered, and `/send` returns `{ok: true}`. That is deliberate — the whole
 confirm → send → sent path in the UI can be demoed with no Photon account.
 
-To send for real:
+To send for real, put the two values in the project's `.env` — the relay
+reads it on startup, so there is no second place to set them:
 
 ```bash
 npm install                                  # pulls @photon-ai/api
-export PHOTON_API_KEY=...                    # project API key
-export PHOTON_PROJECT_ID=...
-node src/index.ts
+# in ../.env:
+#   PHOTON_API_KEY="..."                     # project API key
+#   PHOTON_PROJECT_ID="..."
+node src/index.ts                            # or: make photon
 ```
+
+Anything already in the environment wins over the file, so
+`PHOTON_MODE=stub make photon` still forces stub mode. `/health` reports which
+mode it came up in.
 
 | Variable | Meaning |
 |---|---|
@@ -76,9 +82,15 @@ confirmed*, so `{ok: true}` means "accepted for dispatch", not "delivered".
 3. Assign a shared iMessage line (needs a plan with shared iMessage
    capacity).
 4. From the phone you will demo with, send `ping` as an **iMessage** to the
-   assigned number. Repeat for every contact you want to send to.
+   assigned number. Repeat for every contact you want to send to. Nothing can
+   be sent to a phone that has not done this - that is Photon's rule for
+   shared lines, not ours.
 5. Put the handle of each such contact in `data/contacts.json` (copy
-   `data/contacts.example.json`).
+   `data/contacts.example.json`). The file is gitignored: it holds real phone
+   numbers.
+6. Check it end to end: `curl localhost:3001/health` should say
+   `"mode":"live"`, and `/api/contacts` on the app lists each contact with
+   only the last four digits.
 
 ## What is verified, and what is not
 

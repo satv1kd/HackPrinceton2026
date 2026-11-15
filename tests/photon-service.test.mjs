@@ -14,6 +14,9 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { chooseTransport, createHandler } from "../photon-service/src/index.ts";
@@ -442,4 +445,34 @@ test("text is trimmed before sending", async () => {
 test("unknown routes are 404", async () => {
   const { status } = await call(createHandler(createStubTransport(() => {})), "GET", "/nope");
   assert.equal(status, 404);
+});
+
+/* ---- .env is the one place credentials go ------------------------------- */
+
+test('the relay reads the project .env, and the environment still wins', async () => {
+  const { loadEnvFile } = await import('../photon-service/src/index.ts');
+  const file = join(await mkdtemp(join(tmpdir(), 'heard-env-')), '.env');
+  await writeFile(file, [
+    '# a comment',
+    'PHOTON_API_KEY="pk_live_example"',
+    "PHOTON_PROJECT_ID=proj_123   # the project the line belongs to",
+    'PHOTON_SENDER_ID=',
+    'export PHOTON_MODE=live',
+    'NOT A LINE',
+  ].join('\n'));
+
+  const env = { PHOTON_MODE: 'stub' };   // already set: must not be overwritten
+  loadEnvFile(file, env);
+  assert.equal(env.PHOTON_API_KEY, 'pk_live_example');
+  assert.equal(env.PHOTON_PROJECT_ID, 'proj_123');   // trailing comment stripped
+  assert.equal(env.PHOTON_SENDER_ID, '');
+  assert.equal(env.PHOTON_MODE, 'stub');
+  assert.equal('NOT' in env, false);
+});
+
+test('a missing .env is not an error - it just means stub mode', async () => {
+  const { loadEnvFile } = await import('../photon-service/src/index.ts');
+  const env = {};
+  loadEnvFile('/no/such/.env', env);
+  assert.deepEqual(env, {});
 });

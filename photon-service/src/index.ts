@@ -15,7 +15,10 @@
  * and the service works in stub mode before anyone has a Photon account.
  */
 
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   createPhotonTransport,
@@ -24,6 +27,37 @@ import {
 } from "./transport.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const ENV_FILE = resolve(dirname(fileURLToPath(import.meta.url)), "../../.env");
+
+/**
+ * Read the project's own `.env` into `process.env`.
+ *
+ * The relay is started by `run.sh` and `make photon`, neither of which is a
+ * shell the user has exported anything into, so without this the credentials
+ * would have to be set in a second place to the one `.env.example` documents.
+ * Values already in the environment win, so `PHOTON_MODE=stub make photon`
+ * still does what it says. A missing or unreadable file is not an error: no
+ * credentials means stub mode, which is a perfectly good way to run.
+ */
+export function loadEnvFile(path = ENV_FILE, env: NodeJS.ProcessEnv = process.env): void {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match || line.trimStart().startsWith("#")) continue;
+    const [, key, rawValue] = match;
+    if (key in env) continue;
+    // Strip one layer of matching quotes, then a trailing comment on bare values.
+    let value = rawValue.trim();
+    const quoted = /^(["'])([\s\S]*)\1\s*(?:#.*)?$/.exec(value);
+    value = quoted ? quoted[2] : value.replace(/\s+#.*$/, "").trim();
+    env[key] = value;
+  }
+}
 
 export function chooseTransport(env: NodeJS.ProcessEnv = process.env): MessageTransport {
   const apiKey = env.PHOTON_API_KEY?.trim() ?? "";
@@ -123,6 +157,7 @@ export function createHandler(transport: MessageTransport, projectId = "") {
 }
 
 export function createPhotonServer(env: NodeJS.ProcessEnv = process.env) {
+  if (env === process.env) loadEnvFile();
   const transport = chooseTransport(env);
   return createServer(createHandler(transport, env.PHOTON_PROJECT_ID ?? ""));
 }
