@@ -66,6 +66,15 @@ make install
 
 This creates `.venv/` and installs the Python dependencies. Run it again after pulling changes to `requirements*.txt`.
 
+**Optional: speech-to-text fallback.** When nothing you've recorded matches, Heard can transcribe what you said locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (offline, no key) and offer it as a "best guess" to confirm:
+
+```bash
+make install-stt
+.venv/bin/python scripts/download_models.py --stt   # downloads the model once (~150 MB for base.en)
+```
+
+Then set `STT_OFFLINE=true` in `.env` so the server never downloads at runtime. Without it, Heard works as before with saved phrases only.
+
 ### 2. Configure (optional)
 
 ```bash
@@ -139,8 +148,8 @@ make test-all     # Python + Node client tests
 
 ## Status and roadmap
 
-**Working:** setup, talk mode, top-3 picker, Yes/No feedback with undo, learning from confirmations, ElevenLabs TTS with browser fallback, Photon relay with contacts, and the HTTPS tunnel.
+**Working:** setup, talk mode, top-3 picker, Yes/No feedback with undo, learning from confirmations, ElevenLabs TTS with browser fallback, Photon relay with contacts, the HTTPS tunnel, a local speech-to-text fallback that substitutes your saved phrases when it hears them (results are confirmed before they're spoken, with "Say it again"), and the "Learn from my sounds" switch.
 
-**In progress:** the phonetic generalization engine. Setup phrases will be chosen to cover every English sound, so Heard can learn how a person produces each sound and recognize common words they never recorded. The phoneme recognizer exists in `app/phonetics/` but isn't used by recognition yet.
+**In progress:** the phonetic generalization engine. Setup phrases will be chosen to cover every English sound, so Heard can learn how a person produces each sound and recognize common words they never recorded. The phoneme recognizer exists in `app/phonetics/` but isn't used by recognition yet, so the switch is saved but reports "not built yet" (Taskmaster tasks 22–34).
 
 Task-level status is tracked with Taskmaster: run `task-master list`.

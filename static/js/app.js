@@ -1,11 +1,18 @@
 import { TalkMode } from './talk.js';
 import { SetupMode } from './setup.js';
+import { PreferencesClient, PhoneticToggle, bindListeningIndicator } from './preferences.js';
 
 export class HeardApp {
   constructor() {
     this.mode = 'talk';
     this.talk = new TalkMode(this);
     this.setup = new SetupMode(this);
+    this.preferences = new PreferencesClient();
+    const settings = document.getElementById('listening-settings');
+    if (settings) this.phoneticToggle = new PhoneticToggle(settings, this.preferences, { notify: message => this.showToast(message) });
+    const indicator = document.getElementById('listening-mode');
+    if (indicator) bindListeningIndicator(indicator, this.preferences);
+    this.preferences.load();
     for (const mode of ['talk', 'setup']) {
       document.getElementById(`${mode}-tab`).onclick = () => this.switchMode(mode);
       document.getElementById(`${mode}-tab`).onkeydown = event => {

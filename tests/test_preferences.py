@@ -114,6 +114,7 @@ def test_api_get_and_put(client, data_dir):
         "phonetic_mode": False,
         "phonetic_available": False,
         "phonetic_unavailable_reason": "The sound-learning engine isn't built yet.",
+        "stt_available": False,  # the test fixture turns STT off
     }
     r = client.put("/api/preferences", json={"phonetic_mode": True})
     assert r.status_code == 200 and r.json()["phonetic_mode"] is True
