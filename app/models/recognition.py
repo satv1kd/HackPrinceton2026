@@ -5,8 +5,15 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+#: Which recognizer produced a candidate (Task 17). ``type`` says what it is
+#: (a saved phrase or generated text); ``source`` says who found it - a saved
+#: phrase can also be found by speech-to-text or the phonetic decoder.
+CandidateSource = Literal['phrase', 'phonetic', 'stt']
+
+
 class MatchCandidate(BaseModel):
     type: Literal['phrase', 'generated'] = 'phrase'
+    source: CandidateSource = 'phrase'
     phrase_id: str | None = None
     text: str
     emoji: str | None = None
@@ -18,6 +25,15 @@ class MatchResult(BaseModel):
     attempt_id: str
     confident: bool
     candidates: list[MatchCandidate]
+    #: Recognizer behind the first candidate ('phrase' when nothing matched).
+    stage: CandidateSource = 'phrase'
+    phonetic_mode: bool = False
+    #: When phonetic mode is on but the user's-sounds stage could not run, why.
+    phonetic_skipped_reason: str | None = None
+    #: What local speech-to-text heard, verbatim (None when unavailable).
+    #: Distinct from the candidates: a candidate may be a saved phrase
+    #: substituted for these words, and the user deserves to see both.
+    transcript: str | None = None
 
 
 class PhraseLabel(BaseModel):

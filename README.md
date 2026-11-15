@@ -43,8 +43,8 @@ data/                   Runtime data: phrases, recordings, caches (gitignored, c
 
 ```bash
 # From the repo root, on macOS with Homebrew
-brew install python@3.13 ffmpeg node cloudflared   # skips anything already installed
-make install                                       # Python environment in .venv
+make setup                                         # installs only missing tools; never upgrades
+make install                                       # Python environment in .venv (rebuilt if broken)
 [ -f .env ] || cp .env.example .env                # settings file (keeps an existing one)
 make dev-all                                       # server + HTTPS tunnel + iMessage relay
 ```
@@ -52,6 +52,8 @@ make dev-all                                       # server + HTTPS tunnel + iMe
 Open the `https://…trycloudflare.com` URL it prints on your phone, or http://localhost:8000 on your laptop. Stop with `Ctrl+C`. The sections below explain each step.
 
 ### Prerequisites
+
+`make setup` (`scripts/setup.sh`) installs whichever of these are missing, using Homebrew, and is safe to run repeatedly. Avoid re-running a plain `brew install python@3.13 …` instead: when Python is already installed, it *upgrades* it, and Homebrew's cleanup then deletes the exact Python build `.venv` was made from. If that ever happens, `make install` notices and rebuilds `.venv` (then re-run `make install-stt` if you use speech-to-text).
 
 - **Python 3.13 or older.** librosa and numba don't support 3.14+ yet. `make install` uses `python3.13`; override with `make install PYTHON=python3.12`.
 - **ffmpeg:** `brew install ffmpeg`. Without it, every recording fails with "Didn't catch that".
@@ -66,6 +68,23 @@ make install
 
 This creates `.venv/` and installs the Python dependencies. Run it again after pulling changes to `requirements*.txt`.
 
+**Optional: speech-to-text fallback.** When nothing you've recorded matches, Heard can transcribe what you said locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (offline, no key) and offer it as a "best guess" to confirm:
+
+```bash
+make install-stt
+.venv/bin/python scripts/download_models.py --stt   # downloads the model once (~150 MB for base.en)
+```
+
+Then set `STT_OFFLINE=true` in `.env` so the server never downloads at runtime. Without it, Heard works as before with saved phrases only.
+
+**Optional: sound learning ("Learn from my sounds").** Learns how *you* produce each English sound from the calibration phrases and your Yes/No answers, then suggests words you never recorded. Needs torch, transformers, CMUdict and wordfreq (~1 GB) plus the wav2vec2 phoneme model (~1.2 GB, downloaded once):
+
+```bash
+make install-phonetics        # packages, the 5,000-word list, and the phoneme model
+```
+
+Then record the calibration phrases (http://localhost:8000/calibrate: 18 everyday phrases, twice each, about four minutes) and turn on **Learn from my sounds** in Setup. Setup also shows which sounds Heard has learned. Without the install, the switch explains what is missing and Heard works as before.
+
 ### 2. Configure (optional)
 
 ```bash
@@ -79,7 +98,7 @@ Everything has a working default. The settings you're most likely to change:
 | `ELEVENLABS_API_KEY` | Clear spoken output. If empty, the browser's built-in voice is used. |
 | `ELEVENLABS_VOICE_ID` | Which ElevenLabs voice to use. |
 | `MARGIN`, `ABSOLUTE_MAX` | How sure the matcher must be before it auto-accepts a phrase. Tune with `scripts/tune_thresholds.py`. |
-| `PHOTON_API_KEY`, `PHOTON_PROJECT_ID` | Real iMessage sending. If empty, the relay runs in stub mode. |
+| `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET` | Real iMessage sending. If empty, the relay runs in stub mode. |
 
 ### 3. Start
 
@@ -108,7 +127,7 @@ The relay in `photon-service/` is the only part of the system that talks to Phot
 - **Live mode:**
   ```bash
   cd photon-service && npm install
-  export PHOTON_API_KEY=...  PHOTON_PROJECT_ID=...
+  # put PHOTON_PROJECT_ID and PHOTON_PROJECT_SECRET in .env
   ```
   Then start it with `make photon` or `make dev-all`.
 - **Recipients must message first.** Each recipient has to send `ping` (as an iMessage) to your Photon number once before Heard can text them.
@@ -139,8 +158,8 @@ make test-all     # Python + Node client tests
 
 ## Status and roadmap
 
-**Working:** setup, talk mode, top-3 picker, Yes/No feedback with undo, learning from confirmations, ElevenLabs TTS with browser fallback, Photon relay with contacts, and the HTTPS tunnel.
+**Working:** setup, talk mode, top-3 picker, Yes/No feedback with undo, learning from confirmations, ElevenLabs TTS with browser fallback, Photon relay with contacts, the HTTPS tunnel, a local speech-to-text fallback that substitutes your saved phrases when it hears them (results are confirmed before they're spoken, with "Say it again"), and the "Learn from my sounds" switch.
 
-**In progress:** the phonetic generalization engine. Setup phrases will be chosen to cover every English sound, so Heard can learn how a person produces each sound and recognize common words they never recorded. The phoneme recognizer exists in `app/phonetics/` but isn't used by recognition yet.
+**In progress:** the phonetic generalization engine. Setup phrases will be chosen to cover every English sound, so Heard can learn how a person produces each sound and recognize common words they never recorded. The phoneme recognizer exists in `app/phonetics/` but isn't used by recognition yet, so the switch is saved but reports "not built yet" (Taskmaster tasks 22–34).
 
 Task-level status is tracked with Taskmaster: run `task-master list`.

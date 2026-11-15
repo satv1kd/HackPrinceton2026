@@ -30,6 +30,8 @@ class Phrase(BaseModel):
     origin: Literal["enrollment", "custom", "pack"] = "custom"
     personal_word: bool = False
     phonemes: Optional[list[str]] = None
+    #: For origin="enrollment": which built-in phrase this is (Task 24).
+    enrollment_key: Optional[str] = None
     created_at: datetime = Field(default_factory=_now)
     samples: list[Sample] = Field(default_factory=list)
 

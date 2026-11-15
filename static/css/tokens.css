@@ -1,0 +1,164 @@
+/* Heard design system — dark editorial direction.
+   Palette sampled from the art-direction reference (deep ink blues, sage,
+   one bright paper accent). Shared by the marketing pages, the calibration
+   experience, and the app. */
+
+:root {
+  color-scheme: dark;
+
+  /* palette */
+  --ink-900: #0f161c;
+  --ink-800: #161e24;
+  --ink-700: #19222d;
+  --slate-600: #243344;
+  --slate-500: #2e4158;
+  --steel-400: #6e7f88;
+  --sage-400: #848f85;
+  --moss-500: #4b615a;
+  --mist-200: #b4b6ae;
+  --paper-50: #f9f9f9;
+
+  /* derived */
+  --line: #2c3a48;            /* hairlines on the dark ground */
+  --panel: #1a232d;           /* raised surfaces (cards, inputs on dark) */
+  --panel-2: #202b37;
+  --danger: #c97b6d;          /* calm, never alarm-red */
+
+  /* type */
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: var(--paper-50);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  font-weight: 420;
+  background-color: var(--ink-800);
+  background-image:
+    radial-gradient(1100px 700px at 88% -5%, var(--slate-500) 0%, rgba(46, 65, 88, 0) 62%),
+    radial-gradient(900px 650px at 75% 45%, rgba(36, 51, 68, .85) 0%, rgba(36, 51, 68, 0) 60%),
+    linear-gradient(104deg, var(--ink-800) 0%, var(--ink-700) 50%, var(--slate-600) 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
+/* faint film grain over the gradient, as in the reference photo */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  opacity: .05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+[hidden], .hidden { display: none !important; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+::selection { background: var(--moss-500); color: var(--paper-50); }
+
+h1, h2, h3 { font-family: var(--font-serif); font-weight: 420; letter-spacing: -.02em; margin: 0; }
+
+a { color: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+
+:focus-visible { outline: 3px solid var(--sage-400); outline-offset: 3px; border-radius: 2px; }
+
+.skip-link {
+  position: absolute; top: -100px; left: 16px; z-index: 50;
+  padding: .8rem 1.2rem; background: var(--paper-50); color: var(--ink-800);
+  border-radius: 6px; font-weight: 550; text-decoration: none;
+}
+.skip-link:focus { top: 12px; }
+
+/* ---- shared header / footer ------------------------------------------- */
+
+.site-nav {
+  display: flex; align-items: center; gap: 28px;
+  max-width: 1200px; margin: 0 auto; padding: 22px 36px;
+}
+.site-nav .brand {
+  font-family: var(--font-serif); font-size: 1.45rem; font-weight: 500;
+  letter-spacing: -.03em; text-decoration: none; margin-right: auto;
+  display: inline-flex; align-items: baseline; gap: 8px;
+}
+.site-nav .brand > span:first-child { color: var(--sage-400); }
+.brand-dot { color: var(--sage-400); }
+.site-nav .nav-links { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+.site-nav a:not(.brand) {
+  font-size: .72rem; font-weight: 560; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--mist-200); text-decoration: none; padding: 10px 2px; min-height: 44px;
+  display: inline-flex; align-items: center;
+}
+.site-nav a:not(.brand):hover,
+.site-nav a[aria-current="page"] { color: var(--paper-50); }
+.site-nav a[aria-current="page"] { border-bottom: 1px solid var(--sage-400); }
+
+.site-footer {
+  max-width: 1200px; margin: 90px auto 0; padding: 26px 36px 40px;
+  border-top: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: baseline; justify-content: space-between;
+  color: var(--steel-400); font-size: .85rem;
+}
+.site-footer a { color: var(--mist-200); text-decoration: none; }
+.site-footer a:hover { color: var(--paper-50); text-decoration: underline; text-underline-offset: 3px; }
+.site-footer .foot-links { display: flex; gap: 22px; flex-wrap: wrap; }
+
+/* ---- shared atoms ------------------------------------------------------ */
+
+.eyebrow {
+  font-family: var(--font-sans); font-size: .72rem; font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--mist-200);
+  margin: 0 0 18px;
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 52px; padding: .85rem 1.7rem;
+  font-family: var(--font-sans); font-size: 1rem; font-weight: 550; letter-spacing: .01em;
+  border-radius: 6px; border: 1px solid transparent;
+  text-decoration: none; cursor: pointer; touch-action: manipulation;
+}
+.btn-primary { background: var(--paper-50); color: var(--ink-800); }
+.btn-primary:hover { background: #ffffff; }
+.btn-ghost { background: transparent; color: var(--paper-50); border-color: #3c4c5d; }
+.btn-ghost:hover { border-color: var(--steel-400); background: rgba(249, 249, 249, .04); }
+.btn:disabled { opacity: .55; cursor: default; }
+
+.text-button {
+  background: none; border: 0; color: var(--mist-200); cursor: pointer;
+  font: inherit; font-size: .92rem; min-height: 44px; padding: 8px 4px;
+  text-decoration: underline; text-underline-offset: 4px;
+}
+.text-button:hover { color: var(--paper-50); }
+
+@media (max-width: 640px) {
+  .site-nav { padding: 16px 20px; gap: 16px; }
+  .site-nav .nav-links { gap: 16px; }
+  .site-footer { margin-top: 56px; padding: 22px 20px 32px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@media (forced-colors: active) {
+  .btn, .result-card, .toast { border: 2px solid ButtonText; }
+}

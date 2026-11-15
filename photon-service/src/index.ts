@@ -15,35 +15,92 @@
  * and the service works in stub mode before anyone has a Photon account.
  */
 
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
-  createPhotonTransport,
+  createSpectrumTransport,
   createStubTransport,
   type MessageTransport,
 } from "./transport.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const ENV_FILE = resolve(dirname(fileURLToPath(import.meta.url)), "../../.env");
+
+/**
+ * Read the project's own `.env` into `process.env`.
+ *
+ * The relay is started by `run.sh` and `make photon`, neither of which is a
+ * shell the user has exported anything into, so without this the credentials
+ * would have to be set in a second place to the one `.env.example` documents.
+ * Values already in the environment win, so `PHOTON_MODE=stub make photon`
+ * still does what it says. A missing or unreadable file is not an error: no
+ * credentials means stub mode, which is a perfectly good way to run.
+ */
+export function loadEnvFile(path = ENV_FILE, env: NodeJS.ProcessEnv = process.env): void {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match || line.trimStart().startsWith("#")) continue;
+    const [, key, rawValue] = match;
+    if (key in env) continue;
+    // Strip one layer of matching quotes, then a trailing comment on bare values.
+    let value = rawValue.trim();
+    const quoted = /^(["'])([\s\S]*)\1\s*(?:#.*)?$/.exec(value);
+    value = quoted ? quoted[2] : value.replace(/\s+#.*$/, "").trim();
+    env[key] = value;
+  }
+}
+
+/**
+ * The project id and secret, under any of the names they arrive with.
+ *
+ * `PHOTON_*` is what this project documents, `PROJECT_ID`/`PROJECT_SECRET` is
+ * what Photon's own `bun create spectrum-project` scaffold writes, and
+ * `PHOTON_API_KEY` is what this service asked for while it was built against
+ * the other Photon API - all three name the same two values, and a person
+ * who pasted their secret once should not have to paste it again.
+ */
+export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
+  projectId: string;
+  projectSecret: string;
+} {
+  const first = (...names: string[]): string => {
+    for (const name of names) {
+      const value = env[name]?.trim();
+      if (value) return value;
+    }
+    return "";
+  };
+  return {
+    projectId: first("PHOTON_PROJECT_ID", "PROJECT_ID"),
+    projectSecret: first("PHOTON_PROJECT_SECRET", "PROJECT_SECRET", "PHOTON_API_KEY"),
+  };
+}
 
 export function chooseTransport(env: NodeJS.ProcessEnv = process.env): MessageTransport {
-  const apiKey = env.PHOTON_API_KEY?.trim() ?? "";
-  const projectId = env.PHOTON_PROJECT_ID?.trim() ?? "";
+  const { projectId, projectSecret } = readCredentials(env);
   const forced = env.PHOTON_MODE?.trim().toLowerCase();
 
   if (forced === "stub") return createStubTransport();
-  if (forced === "live" || (apiKey && projectId)) {
-    if (!apiKey || !projectId) {
+  if (forced === "live" || (projectSecret && projectId)) {
+    if (!projectSecret || !projectId) {
       throw new Error(
-        "PHOTON_MODE=live needs both PHOTON_API_KEY and PHOTON_PROJECT_ID",
+        "PHOTON_MODE=live needs both PHOTON_PROJECT_ID and PHOTON_PROJECT_SECRET",
       );
     }
-    // Optional: pins the sending line when a project has more than one.
-    const senderId = env.PHOTON_SENDER_ID?.trim() || undefined;
-    return createPhotonTransport({ apiKey, projectId, senderId });
+    return createSpectrumTransport({ projectId, projectSecret });
   }
   console.log(
-    "[photon] no PHOTON_API_KEY/PHOTON_PROJECT_ID; starting in stub mode " +
-      "(messages are logged, not sent)",
+    "[photon] no PHOTON_PROJECT_ID/PHOTON_PROJECT_SECRET; starting in stub " +
+      "mode (messages are logged, not sent)",
   );
   return createStubTransport();
 }
@@ -123,8 +180,9 @@ export function createHandler(transport: MessageTransport, projectId = "") {
 }
 
 export function createPhotonServer(env: NodeJS.ProcessEnv = process.env) {
+  if (env === process.env) loadEnvFile();
   const transport = chooseTransport(env);
-  return createServer(createHandler(transport, env.PHOTON_PROJECT_ID ?? ""));
+  return createServer(createHandler(transport, readCredentials(env).projectId));
 }
 
 // Only listen when run directly, so tests can import the handler.

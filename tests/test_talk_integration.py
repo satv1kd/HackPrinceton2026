@@ -71,5 +71,6 @@ def test_empty_library_errors_and_expired_undo(client, monkeypatch):
     monkeypatch.setattr('app.services.feedback.utcnow', lambda: future)
     assert client.post('/api/feedback/undo', json={'attempt_id': result['attempt_id']}).status_code == 400
     assert client.post('/api/recognize', files={'audio': ('clip.wav', b'broken audio', 'audio/wav')}).status_code == 422
-    assert client.get('/').status_code == 200
-    assert 'Hold to talk' in client.get('/').text
+    assert client.get('/').status_code == 200          # marketing home
+    assert client.get('/calibrate').status_code == 200  # reading experience
+    assert 'Hold to talk' in client.get('/app').text    # the prototype itself

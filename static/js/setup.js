@@ -464,9 +464,19 @@ export class SampleRecorderFlow {
    * Tapping Play twice quickly revoked the URL the first player was still
    * loading, and Chrome rejected it with "NotSupportedError: no supported
    * source" — reported as "Could not play that back" although the clip was fine.
+   *
+   * The <audio> element can still refuse a clip it cannot parse as a media
+   * file (NotSupportedError) - seen intermittently in real use, depending on
+   * the input device and browser. So a refusal falls back to decoding the clip
+   * with the Web Audio API, a separate and more forgiving decoder. Only if that
+   * fails too is the clip treated as empty, with advice the user can act on.
    */
   play() {
     if (!this.pending) return;
+    // Created and resumed here, inside the tap, so the fallback below is still
+    // allowed to make sound after the <audio> attempt has failed (Safari).
+    this.ensureAudioContext();
+    this.stopFallback();
     if (!this.player) {
       this.playbackUrl = URL.createObjectURL(this.pending.blob);
       this.player = new Audio(this.playbackUrl);
@@ -474,19 +484,62 @@ export class SampleRecorderFlow {
       this.player.pause();
       this.player.currentTime = 0;
     }
-    const { blob, mimeType } = this.pending;
-    this.player.play().catch(error => {
+    const pending = this.pending;
+    this.player.play().catch(async error => {
       // AbortError just means a newer tap interrupted this one.
       if (error.name === 'AbortError') return;
-      console.error('Sample playback failed', { error, mimeType, size: blob.size });
-      this.update(`Could not play that back (${error.name}: ${error.message}).`, 'error');
+      if (await this.playDecoded(pending.blob)) return;
+      if (this.pending !== pending) return; // discarded while decoding
+      console.error('Sample playback failed', { error, mimeType: pending.mimeType, size: pending.blob.size });
+      this.update(
+        'No sound was captured in that recording. Check that the right microphone is selected '
+          + '(your system’s sound input settings), then tap Re-record.',
+        'error',
+      );
     });
+  }
+
+  ensureAudioContext() {
+    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    try {
+      this.audioContext ||= new AudioContextClass();
+      if (this.audioContext.state === 'suspended') this.audioContext.resume?.().catch(() => {});
+    } catch {
+      this.audioContext = null;
+    }
+    return this.audioContext;
+  }
+
+  /** Decode the clip with Web Audio and play it. Resolves false if it cannot be decoded. */
+  async playDecoded(blob) {
+    const context = this.audioContext;
+    if (!context) return false;
+    try {
+      const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+      if (!buffer || buffer.duration === 0) return false;
+      this.stopFallback();
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.start();
+      this.fallbackSource = source;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  stopFallback() {
+    try { this.fallbackSource?.stop(); } catch { /* already finished */ }
+    this.fallbackSource = null;
   }
 
   /** Stop playback and free the clip's URL; called whenever the recording is discarded. */
   releasePlayback() {
     this.player?.pause();
     this.player = null;
+    this.stopFallback();
     if (this.playbackUrl) {
       URL.revokeObjectURL(this.playbackUrl);
       this.playbackUrl = null;
@@ -535,6 +588,9 @@ export class SampleRecorderFlow {
   close() {
     this.recorder.cancel();
     this.releasePlayback();
+    // Browsers cap how many AudioContexts a page may hold open.
+    this.audioContext?.close?.().catch(() => {});
+    this.audioContext = null;
     this.overlay?.remove();
     this.overlay = null;
   }

@@ -54,6 +54,11 @@ def encode(audio: np.ndarray, fmt: str, sr: int = 48000) -> bytes:
 def data_dir(tmp_path, monkeypatch):
     d = tmp_path / "data"
     monkeypatch.setenv("DATA_DIR", str(d))
+    # App tests must not depend on (or spend seconds loading) the real
+    # speech-to-text model; tests that want it turn it back on.
+    monkeypatch.setenv("STT_ENABLED", "false")
+    # Nor on the 1.2 GB phoneme model; phonetics tests inject fakes.
+    monkeypatch.setenv("PHONEMES_ENABLED", "false")
     reset_caches()
     yield d
     reset_caches()

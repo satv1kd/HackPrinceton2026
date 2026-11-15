@@ -25,7 +25,7 @@ class AttemptStore:
     def path(self, attempt_id):
         return self.attempts_dir / attempt_key(attempt_id)
 
-    def save(self, attempt_id, audio_bytes, features, result, recognized_phonemes=None):
+    def save(self, attempt_id, audio_bytes, features, result, recognized_phonemes=None, extras=None):
         key = attempt_key(attempt_id)
         features = feature_matrix(features)
         if result.attempt_id != key or not audio_bytes:
@@ -41,7 +41,8 @@ class AttemptStore:
                 np.save(buffer, features, allow_pickle=False)
                 atomic_bytes(temporary / 'features.npy', buffer.getvalue())
                 atomic_json(temporary / 'metadata.json', dict(result.model_dump(),
-                    timestamp=utcnow().isoformat(), recognized_phonemes=recognized_phonemes))
+                    timestamp=utcnow().isoformat(), recognized_phonemes=recognized_phonemes,
+                    extras=extras or {}))
                 os.rename(temporary, target)
             finally:
                 if temporary.exists():

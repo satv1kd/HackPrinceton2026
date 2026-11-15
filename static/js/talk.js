@@ -18,6 +18,9 @@ export class TalkMode {
     this.tts = new TTSPlayer();
     this.correction = new CorrectionFlow();
     this.sendContainer = document.getElementById('send-buttons');
+    this.replayButton = document.getElementById('replay-btn');
+    // The text most recently said aloud, for "Say it again".
+    this.spokenText = null;
     // Which attempt we have already spoken, so a Yes tap on a phrase that
     // was auto-spoken does not say it twice in a row.
     this.autoSpokenAttempt = null;
@@ -54,6 +57,7 @@ export class TalkMode {
     this.toggle.onclick = () => this.state === 'idle' ? this.startRecording() : this.stopRecording();
     document.getElementById('yes-btn').onclick = () => this.sendFeedback(true, this.result?.candidates[0]);
     document.getElementById('no-btn').onclick = () => this.correct();
+    if (this.replayButton) this.replayButton.onclick = () => { if (this.spokenText) this.tts.speak(this.spokenText); };
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.cancel(); });
     window.addEventListener('pagehide', () => this.cancel());
     window.addEventListener('blur', () => { if (this.state === 'recording') this.cancel(); });
@@ -81,6 +85,7 @@ export class TalkMode {
     this.tts.unlock();
     this.tts.stop();
     this.clearSendButtons();
+    this.hideReplay();
     this.setState('requesting', 'Allow microphone access if your browser asks.');
     try {
       const recording = await this.recorder.start(() => {
@@ -100,7 +105,7 @@ export class TalkMode {
       this.result = result;
       this.showResult();
       this.autoSpeak();
-      this.setState('idle', result.candidates.length ? 'Choose a phrase or tell us if we heard you right.' : 'No matching phrases are available yet.');
+      this.setState('idle', statusFor(result));
     } catch (error) {
       if (generation !== this.generation) return;
       const message = error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow it in your browser settings, then try again.' : error.name === 'NotFoundError' ? 'No microphone was found.' : error.message;
@@ -118,6 +123,7 @@ export class TalkMode {
     this.tts.stop();
     this.correction.close();
     this.clearSendButtons();
+    this.hideReplay();
     this.setState('idle', 'Ready when you are.');
   }
 
@@ -126,29 +132,37 @@ export class TalkMode {
     // Re-rendering the card (including after an undo) retires any send
     // buttons, so they always belong to the text currently on screen.
     this.clearSendButtons();
+    this.hideReplay();
     const card = document.getElementById('result-card');
     const list = document.getElementById('candidate-list');
     const feedback = document.getElementById('feedback-buttons');
+    const text = document.getElementById('result-text');
     list.replaceChildren();
     card.hidden = candidates.length === 0;
-    feedback.hidden = !confident || candidates.length === 0;
+    // One answer (confident, or a single unsure guess such as a transcript)
+    // is shown as the result with Yes / No. Several unsure answers become
+    // the picker. Nothing unsure is spoken until the user confirms it.
+    const single = confident || candidates.length === 1;
+    feedback.hidden = !single || candidates.length === 0;
+    const heard = document.getElementById('heard-line');
+    if (heard) heard.hidden = true;
     if (!candidates.length) return;
-    document.getElementById('result-heading').textContent = confident ? 'DID WE HEAR YOU RIGHT?' : 'WHICH ONE DID YOU MEAN?';
-    document.getElementById('result-text').textContent = confident ? `${candidates[0].emoji || '💬'} ${candidates[0].text}` : 'Tap the phrase you meant.';
-    if (!confident) {
+    document.getElementById('result-heading').textContent = single ? 'DID WE HEAR YOU RIGHT?' : 'WHICH ONE DID YOU MEAN?';
+    if (single) {
+      text.replaceChildren(`${iconFor(candidates[0])} ${candidates[0].text}`);
+      const badge = badgeFor(candidates[0]);
+      if (badge) text.append(badge);
+      this.showHeardLine(heard, candidates[0]);
+    } else {
+      text.textContent = 'Tap the phrase you meant.';
       for (const candidate of candidates.slice(0, 3)) {
         const button = document.createElement('button');
-        const generated = candidate.type === 'generated';
-        // Generated text comes from the phonetic decoder, which is less
+        // Generated text (speech-to-text or the phonetic decoder) is less
         // reliable than a recorded phrase, so it must look different: the
         // user should be able to tell which guesses are weaker.
-        button.textContent = `${candidate.emoji || (generated ? '💬' : '❓')} ${candidate.text}`;
-        if (generated) {
-          const badge = document.createElement('span');
-          badge.className = 'generated-badge';
-          badge.textContent = 'Suggested';
-          button.append(badge);
-        }
+        button.textContent = `${iconFor(candidate)} ${candidate.text}`;
+        const badge = badgeFor(candidate);
+        if (badge) button.append(badge);
         button.onclick = () => this.sendFeedback(true, candidate);
         list.append(button);
       }
@@ -158,6 +172,38 @@ export class TalkMode {
       list.append(none);
     }
     card.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  }
+
+  /** Say text aloud and offer "Say it again" for it. */
+  say(text) {
+    this.spokenText = text;
+    this.tts.speak(text);
+    if (this.replayButton) {
+      this.replayButton.hidden = false;
+      this.replayButton.disabled = false;
+    }
+  }
+
+  hideReplay() {
+    this.spokenText = null;
+    if (this.replayButton) this.replayButton.hidden = true;
+  }
+
+  /**
+   * Say what speech-to-text literally heard, when it differs from the answer.
+   *
+   * A saved phrase can lead because the user's "wawa" is enrolled as
+   * "I want water". Showing the raw transcript underneath is how the person
+   * sees *why* we picked it — without it, a substitution looks like the app
+   * ignoring them. Hidden when the two agree, which is most of the time.
+   */
+  showHeardLine(heard, candidate) {
+    const transcript = this.result?.transcript;
+    if (!heard || !transcript || candidate.type !== 'phrase') return;
+    const plain = value => value.trim().toLowerCase().replace(/[.!?,]/g, '');
+    if (plain(transcript) === plain(candidate.text)) return;
+    heard.textContent = `We heard “${transcript}”`;
+    heard.hidden = false;
   }
 
   /**
@@ -172,7 +218,7 @@ export class TalkMode {
     const best = this.result?.candidates?.[0];
     if (!this.result?.confident || !best || best.type !== 'phrase') return;
     this.autoSpokenAttempt = this.result.attempt_id;
-    this.tts.speak(best.text);
+    this.say(best.text);
   }
 
   /** Open the correction flow and feed its answer back as feedback. */
@@ -232,13 +278,16 @@ export class TalkMode {
       const response = await postJSON('/api/feedback', { attempt_id: attemptId, correct, label });
       if (candidate && this.result?.attempt_id === attemptId) {
         document.getElementById('result-heading').textContent = 'YOUR WORDS';
-        document.getElementById('result-text').textContent = `${candidate.emoji || '💬'} ${candidate.text}`;
+        document.getElementById('result-text').textContent = `${iconFor(candidate)} ${candidate.text}`;
         document.getElementById('candidate-list').replaceChildren();
+        const heardLine = document.getElementById('heard-line');
+        if (heardLine) heardLine.hidden = true;
         document.getElementById('feedback-buttons').hidden = true;
         document.getElementById('result-card').hidden = false;
         // Confirmed, so it is safe to say out loud and safe to send. Skip the
         // speech if this exact attempt was already spoken automatically.
-        if (this.autoSpokenAttempt !== attemptId) this.tts.speak(candidate.text);
+        if (this.autoSpokenAttempt !== attemptId) this.say(candidate.text);
+        else if (this.replayButton) this.replayButton.hidden = false;
         this.showSendButtons(candidate.text);
       }
       this.status.textContent = correct ? 'Thank you. Your response is saved.' : 'Thanks for letting us know. You can try again.';
@@ -257,4 +306,28 @@ export class TalkMode {
       this.toggle.disabled = false;
     }
   }
+}
+
+/** Saved phrases show their emoji; generated text a speech bubble. */
+export function iconFor(candidate) {
+  return candidate.emoji || (candidate.type === 'generated' ? '💬' : '❓');
+}
+
+const BADGES = { stt: 'Best guess', phonetic: 'From your sounds' };
+
+/** A visible marker for generated text, naming which recognizer guessed it. */
+export function badgeFor(candidate) {
+  if (candidate.type !== 'generated') return null;
+  const badge = document.createElement('span');
+  badge.className = 'generated-badge';
+  badge.textContent = BADGES[candidate.source] || 'Suggested';
+  return badge;
+}
+
+function statusFor(result) {
+  const { candidates, confident } = result;
+  if (!candidates.length) return 'We didn’t catch that. Try again, or add this phrase in Setup.';
+  if (confident) return 'Tell us if we heard you right.';
+  if (candidates.length === 1) return 'Is this what you said? Tap Yes to say it out loud.';
+  return 'Choose what you meant, or tap None of these.';
 }

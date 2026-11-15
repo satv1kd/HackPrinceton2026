@@ -492,3 +492,74 @@ test('closing the flow removes the overlay', async () => {
   flow.close();
   assert.equal(document.querySelector('.sample-flow-overlay'), null);
 });
+
+// -- playback fallback (the <audio> element refusing a clip) ----------------
+
+class FakeAudioContext {
+  static decodes = 'ok';
+  static instances = [];
+  constructor() { this.state = 'suspended'; this.started = []; this.closed = false; FakeAudioContext.instances.push(this); }
+  async resume() { this.state = 'running'; }
+  async close() { this.closed = true; }
+  async decodeAudioData() {
+    if (FakeAudioContext.decodes !== 'ok') throw new Error('EncodingError');
+    return { duration: 1.2 };
+  }
+  createBufferSource() {
+    const ctx = this;
+    return { connect() {}, start() { ctx.started.push(this); }, stop() {} };
+  }
+  get destination() { return {}; }
+}
+
+function refusingAudio(t) {
+  const original = FakeAudio.prototype.play;
+  FakeAudio.prototype.play = async function () {
+    const error = new Error('Failed to load because no supported source was found.');
+    error.name = 'NotSupportedError';
+    throw error;
+  };
+  t.after(() => { FakeAudio.prototype.play = original; delete globalThis.AudioContext; FakeAudioContext.decodes = 'ok'; });
+  globalThis.AudioContext = FakeAudioContext;
+}
+
+async function recordedFlow() {
+  stubFetch({ '/samples': () => jsonReply(201, { id: 's' }) });
+  const flow = new SampleRecorderFlow(
+    { id: 'p1', text: 'x', sample_count: 0 },
+    { recorder: fakeRecorder([{ ...RECORDING, blob: { size: 2048, arrayBuffer: async () => new ArrayBuffer(8) } }]), onDone: () => {} },
+  );
+  flow.open();
+  await flow.recordBtn.click();
+  return flow;
+}
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('a clip the <audio> element refuses is played through Web Audio instead', async t => {
+  refusingAudio(t);
+  const flow = await recordedFlow();
+  await flow.playBtn.click();
+  await settle();
+  const context = FakeAudioContext.instances.at(-1);
+  assert.equal(context.state, 'running', 'context resumed inside the tap');
+  assert.equal(context.started.length, 1, 'decoded clip played');
+  assert.notEqual(flow.message.className, 'form-error', 'no error shown when the fallback works');
+  flow.close();
+  assert.equal(context.closed, true, 'closing the screen releases the audio context');
+});
+
+test('a clip neither player can decode gets plain advice, not a browser error', async t => {
+  refusingAudio(t);
+  FakeAudioContext.decodes = 'fail';
+  const originalError = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = originalError; });
+  const flow = await recordedFlow();
+  await flow.playBtn.click();
+  await settle();
+  assert.equal(flow.message.className, 'form-error');
+  assert.match(flow.message.textContent, /No sound was captured/);
+  assert.doesNotMatch(flow.message.textContent, /NotSupportedError/);
+  flow.close();
+});

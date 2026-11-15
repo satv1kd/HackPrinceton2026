@@ -23,6 +23,40 @@ for arg in "$@"; do
 done
 
 PORT="${PORT:-8000}"
+
+# Refuse to start on a busy port, and say who has it. Without this, a second
+# `make dev-all` (often a forgotten one in another terminal tab) crashes with
+# "Address already in use" from uvicorn and a Node stack trace from the relay.
+port_owner() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1; }
+short_cmd() {  # the command line, with Homebrew's long Python path shortened
+  ps -o command= -p "$1" 2>/dev/null | sed -E 's#^/[^ ]*/(Python|python3[.0-9]*)( |$)#python\2#' | cut -c1-70
+}
+OLD_RUN=""
+check_port() {  # check_port <port> <what>
+  local pid parent
+  pid=$(port_owner "$1") || true
+  [ -z "$pid" ] && return 0
+  echo "[run] port $1 ($2) is in use by pid $pid: $(short_cmd "$pid")" >&2
+  # Was it started by another run.sh? Killing that one stops everything it started.
+  parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  if [ -n "$parent" ] && ps -o command= -p "$parent" 2>/dev/null | grep -q 'run\.sh'; then OLD_RUN=$parent; fi
+  return 1
+}
+busy=0
+check_port "$PORT" "server" || busy=1
+if [ "$WITH_PHOTON" = 1 ]; then check_port "${PHOTON_PORT:-3001}" "iMessage relay" || busy=1; fi
+if [ "$busy" = 1 ]; then
+  echo "[run] Heard is probably already running, maybe in another terminal tab." >&2
+  echo "[run] Use that one (http://localhost:$PORT), or stop it with Ctrl+C in its tab" >&2
+  if [ -n "$OLD_RUN" ]; then
+    echo "[run] or run:  kill $OLD_RUN   (the earlier ./run.sh; stops its server, relay and tunnel)" >&2
+  else
+    echo "[run] or stop the process above, then start again." >&2
+  fi
+  echo "[run] To run a second copy instead: PORT=8001 PHOTON_PORT=3002 ./run.sh" >&2
+  exit 1
+fi
+
 PIDS=()
 # Kill the whole group: cloudflared and uvicorn --reload both spawn children.
 cleanup() { for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done; }

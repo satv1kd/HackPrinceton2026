@@ -29,7 +29,17 @@ def invoke(operation, *args):
 @router.post('/feedback')
 def feedback(body: FeedbackRequest, request: Request):
     label = body.label.model_dump() if body.label else None
-    return invoke(store_for(request).record, str(body.attempt_id), body.correct, label)
+    response = invoke(store_for(request).record, str(body.attempt_id), body.correct, label)
+    # Every confirmed attempt is training data for the sound profile; retrain
+    # in the background once enough new examples of a sound have built up.
+    try:
+        from app.deps import get_profile_trainer
+        triggered = get_profile_trainer().on_feedback()
+    except Exception:  # learning must never break saving the response
+        import logging
+        logging.getLogger(__name__).exception('could not check for a profile retrain')
+        triggered = False
+    return {**response, 'retrain_triggered': bool(triggered)}
 
 
 @router.post('/feedback/undo')

@@ -25,7 +25,7 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 from app.phonetics.inventory import PHONEME_SET, PHONEMES
 
 
-MAPPING_REVISION = 1
+MAPPING_REVISION = 2
 """Bump this whenever the tables below change meaning.
 
 Cached phoneme recognitions (``data/phonemes/*.json``) record the revision
@@ -173,6 +173,91 @@ def tokenize_espeak(text: str) -> List[str]:
     return tokens
 
 
+# ---------------------------------------------------------------------------
+# Lenient mapping for recognizer output (revision 2)
+# ---------------------------------------------------------------------------
+# The phoneme model (facebook/wav2vec2-lv-60-espeak-cv-ft) is multilingual: its
+# vocabulary has 392 symbols, most of them not English phones (tones, nasal
+# vowels, retroflexes...). Typical English speech rarely produces them, but
+# atypical speech can, and on real synthesized English the model already
+# emitted ``ʉ`` (a fronted /u/). Raising on such a symbol would throw away the
+# whole recording, so recognizer output goes through this lenient path: each
+# symbol maps to its nearest English phone by the table below, with tone
+# digits and diacritics stripped first. Anything still unmappable is dropped
+# and *reported* (``LenientResult.dropped``), never silently.
+#
+# The strict :func:`espeak_to_canonical` above is unchanged, for inputs that
+# must be English (the lexicon side).
+
+ESPEAK_APPROXIMATIONS: Dict[str, Tuple[str, ...]] = {
+    # vowels without an English counterpart -> nearest English vowel
+    "ʉ": ("UW",), "ɯ": ("UW",), "ɯᵝ": ("UW",), "y": ("UW",), "ɵ": ("OW",),
+    "ɨ": ("IH",), "ᵻ": ("IH",), "ø": ("ER",), "œ": ("ER",), "oe": ("ER",), "ɤ": ("AH",),
+    "ä": ("AA",), "e̞": ("EH",), "o̞": ("OW",), "ɞ": ("AH",),
+    "ɑ̃": ("AA",), "ã": ("AA",), "ɛ̃": ("EH",), "ẽ": ("EH",), "ɔ̃": ("AO",), "õ": ("OW",),
+    "œ̃": ("AH",), "ĩ": ("IY",), "ũ": ("UW",), "ɐ̃": ("AH",),
+    "eʊ": ("OW",), "ɛʊ": ("OW",), "ɛɪ": ("EY",), "əɪ": ("EY",), "æi": ("AY",), "ei": ("EY",),
+    "ai": ("AY",), "au": ("AW",), "ou": ("OW",), "oɪ": ("OY",), "ɪu": ("UW",), "iʊ": ("UW",),
+    "ui": ("UW", "IY"), "ie": ("IY", "EH"), "ee": ("IY",),
+    # r-coloured and centering combinations English speech does produce
+    "ɪɹ": ("IH", "R"), "ɛɹ": ("EH", "R"), "ʊɹ": ("UH", "R"), "ɔːɹ": ("AO", "R"),
+    "ɑːɹ": ("AA", "R"), "oːɹ": ("AO", "R"), "aɪɚ": ("AY", "ER"), "aɪə": ("AY", "AH"),
+    "iə": ("IY", "AH"), "ju": ("Y", "UW"), "əl": ("AH", "L"), "r̩": ("ER",),
+    # consonants -> nearest English consonant
+    "β": ("V",), "ʋ": ("V",), "ɸ": ("F",), "pf": ("P", "F"),
+    "ɣ": ("G",), "ʁ": ("R",), "ʀ": ("R",), "χ": ("K",), "ħ": ("HH",), "ʕ": ("HH",),
+    "ç": ("HH",), "ʝ": ("Y",), "c": ("K",), "ɟ": ("G",), "q": ("K",), "ɴ": ("NG",),
+    "ɲ": ("N", "Y"), "ʎ": ("L", "Y"), "ɳ": ("N",), "ɭ": ("L",), "ɬ": ("L",), "ɽ": ("R",),
+    "ʈ": ("T",), "ɖ": ("D",), "ʂ": ("SH",), "ʐ": ("ZH",), "ɕ": ("SH",), "ʑ": ("ZH",),
+    "tɕ": ("CH",), "dʑ": ("JH",), "ts": ("T", "S"), "dz": ("D", "Z"), "sx": ("S", "K"),
+    "r̝": ("R",), "r̝̊": ("R",), "ʃʲ": ("SH",), "ɮ": ("L",),
+    # X-SAMPA letters that leak into the vocabulary
+    "S": ("SH",), "Z": ("ZH",), "N": ("NG",), "X": ("K",), "tS": ("CH",), "dZ": ("JH",),
+    "th": ("TH",), "ph": ("P",), "kh": ("K",), "tsh": ("T", "S"), "tɕh": ("CH",),
+    "ts.h": ("T", "S"), "ts.": ("T", "S"), "s.": ("S",),
+}
+
+#: Stripped before lenient matching: tone numbers/letters and modifier marks.
+_LENIENT_STRIP = set("0123456789ɜ:ː.^[]ʲʰˤ\"'") | {"\u0303", "\u0329", "\u032A", "\u031E",
+                                                      "\u0325", "\u032F", "\u0308", "\u030A",
+                                                      "\u031D"}
+
+_ALL_LENIENT: Dict[str, Tuple[str, ...]] = {**ESPEAK_APPROXIMATIONS, **ESPEAK_TO_CANONICAL}
+_MAX_LENIENT_KEY = max(len(k) for k in _ALL_LENIENT)
+
+
+def espeak_to_canonical_lenient(text: str):
+    """Map recognizer output to canonical phonemes, approximating non-English
+    symbols. Returns ``(phonemes, tokens, dropped)``.
+
+    Same longest-first scan as :func:`tokenize_espeak`, over the English table
+    plus :data:`ESPEAK_APPROXIMATIONS`; stress, length, tone digits and
+    diacritics that are not part of a matched symbol are skipped; any other
+    character is collected in ``dropped`` instead of raising.
+    """
+    phonemes: List[str] = []
+    tokens: List[str] = []
+    dropped: List[str] = []
+    index, length = 0, len(text)
+    while index < length:
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        for size in range(min(_MAX_LENIENT_KEY, length - index), 0, -1):
+            piece = text[index:index + size]
+            if piece in _ALL_LENIENT:
+                tokens.append(piece)
+                phonemes.extend(_ALL_LENIENT[piece])
+                index += size
+                break
+        else:
+            if char not in IGNORED_MARKS and char not in _LENIENT_STRIP:
+                dropped.append(char)
+            index += 1
+    return phonemes, tokens, dropped
+
+
 def espeak_to_canonical(text: str) -> List[str]:
     """Convert an espeak IPA string to canonical phonemes."""
     canonical: List[str] = []
@@ -238,6 +323,11 @@ if _reachable != PHONEME_SET:
 
 if set(CANONICAL_TO_IPA) != PHONEME_SET:
     raise AssertionError("CANONICAL_TO_IPA must cover exactly the inventory")
+
+for _key, _value in ESPEAK_APPROXIMATIONS.items():
+    for _phoneme in _value:
+        if _phoneme not in PHONEME_SET:
+            raise AssertionError(f"approximation {_key!r} -> {_phoneme!r} is not canonical")
 
 if not IGNORED_MARKS.isdisjoint(ESPEAK_TO_CANONICAL):
     raise AssertionError("a symbol cannot be both mapped and ignored")

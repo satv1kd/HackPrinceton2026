@@ -45,11 +45,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np  # noqa: E402
-from fastdtw import fastdtw  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.services.features import FeatureCache, get_extractor  # noqa: E402
-from app.services.matcher import cosine_distance, feature_matrix  # noqa: E402
+from app.services.matcher import dtw_distance, feature_matrix  # noqa: E402
 from app.services.storage import PhraseStore  # noqa: E402
 
 # Keeping a true match out of the picker is worse than asking, so leave the
@@ -62,8 +61,7 @@ MARGIN_SAFETY = 0.8
 
 def distance_between(a: np.ndarray, b: np.ndarray) -> float:
     """Path-normalised DTW distance, exactly as DTWMatcher scores it."""
-    total, path = fastdtw(a, b, dist=cosine_distance)
-    return float(total / len(path))
+    return dtw_distance(a, b)
 
 
 def load_features(store: PhraseStore, cache: FeatureCache) -> dict:

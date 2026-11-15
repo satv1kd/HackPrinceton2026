@@ -13,7 +13,7 @@ const result = () => ({ attempt_id: 'one', confident: true, candidates: [
 const ok = data => ({ ok: true, json: async () => data });
 
 beforeEach(async () => {
-  dom = new JSDOM(readFileSync(new URL('../static/index.html', import.meta.url)), { url: 'http://localhost/' });
+  dom = new JSDOM(readFileSync(new URL('../static/app.html', import.meta.url)), { url: 'http://localhost/' });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.CustomEvent = dom.window.CustomEvent;

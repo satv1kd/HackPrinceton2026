@@ -121,14 +121,16 @@ def test_output_is_canonical_phonemes(recognizer, wav):
     assert result.raw_phonemes == ["aɪ", "w", "ɑ", "n", "t", "w", "ɔː", "t", "ɚ"]
 
 
-def test_an_unmappable_symbol_raises_instead_of_being_dropped(tmp_path, wav):
-    """A dropped phone is indistinguishable from a deletion by the speaker,
-    which would teach the Task 20 profile something false."""
-    bad = PhonemeRecognizer(
-        backend=FakeBackend(raw_text="hɛɮoʊ"), cache_dir=tmp_path / "phonemes"
-    )
-    with pytest.raises(mapping.UnknownPhonemeError):
-        bad.recognize(wav, cache_id="s1")
+def test_non_english_symbols_are_approximated_and_unknown_ones_reported(tmp_path, wav):
+    """The model is multilingual. A non-English phone maps to the nearest
+    English one (revision 2); a symbol with no approximation is dropped but
+    *reported* on the result and in the cache, never silently - a silent drop
+    would look like the speaker deleting a sound."""
+    rec = PhonemeRecognizer(backend=FakeBackend(raw_text="hɛɮoʊ ☃"), cache_dir=tmp_path / "phonemes")
+    result = rec.recognize(wav, cache_id="s1")
+    assert result.phonemes == ["HH", "EH", "L", "OW"]
+    assert result.dropped == ["☃"]
+    assert rec.recognize(wav, cache_id="s1").dropped == ["☃"]          # from the cache
 
 
 def test_latency_and_duration_are_reported(recognizer, wav):

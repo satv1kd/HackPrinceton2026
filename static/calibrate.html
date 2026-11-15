@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161e24">
+  <title>Calibration — Heard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..640;1,9..144,340..640&family=Inter+Tight:wght@380..680&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/calibrate.css">
+</head>
+<body>
+  <a class="skip-link" href="#app">Skip to main content</a>
+
+  <header>
+    <nav class="site-nav" aria-label="Site">
+      <a class="brand" href="/"><span aria-hidden="true">◖</span>heard<span class="brand-dot">.</span></a>
+      <div class="nav-links">
+        <a href="/how-it-works">How it works</a>
+        <a href="/calibrate" aria-current="page">Calibration</a>
+        <a href="/about">About</a>
+        <a href="/app">Open the app</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="app" class="calibrate-main">
+
+    <!-- 1 · Intro -->
+    <section id="screen-intro" class="screen" aria-labelledby="intro-title">
+      <p class="eyebrow">Calibration · about 4 minutes</p>
+      <h1 id="intro-title" class="display">Say a little.<br><em>Teach us a lot.</em></h1>
+      <p class="lede">
+        You’ll say <span id="phrase-count">18</span> short everyday phrases — each one
+        twice — while we record them.
+        Together they carry every sound in English — which is how we start
+        learning the way <em>you</em> say things.
+      </p>
+      <ul class="plain-facts">
+        <li>Nothing is graded. There is no wrong way to sound.</li>
+        <li>You can pause, skip a phrase, or stop at any time.</li>
+        <li>Recordings go only to Heard running on your own machine.</li>
+      </ul>
+      <div class="actions">
+        <button id="begin-btn" class="btn btn-primary">Begin — check my microphone</button>
+        <a class="text-button" href="/">Maybe later</a>
+      </div>
+    </section>
+
+    <!-- 2 · Mic check -->
+    <section id="screen-mic" class="screen" hidden aria-labelledby="mic-title">
+      <p class="eyebrow">Microphone check</p>
+      <h1 id="mic-title" class="display">Say anything.</h1>
+      <p class="lede">A word, a hum, your name — we’re only making sure we can hear you.</p>
+
+      <div class="meter" role="img" aria-label="Microphone level">
+        <div id="meter-fill" class="meter-fill"></div>
+      </div>
+      <p id="mic-status" class="status" role="status" aria-live="polite">Waiting for microphone access…</p>
+
+      <div id="mic-denied" class="notice" hidden>
+        <h2>We couldn’t reach the microphone</h2>
+        <p>That’s okay — it usually means the browser is being careful. To allow it:</p>
+        <ol>
+          <li>Look for the small microphone or lock icon in the address bar.</li>
+          <li>Choose <strong>Allow</strong> for the microphone.</li>
+          <li>Come back and press “Try again”.</li>
+        </ol>
+        <button id="mic-retry" class="btn btn-ghost">Try again</button>
+      </div>
+
+      <div class="actions">
+        <button id="mic-continue" class="btn btn-primary" disabled>Start</button>
+        <a class="text-button" href="/">Not today</a>
+      </div>
+    </section>
+
+    <!-- 3 · Reading -->
+    <section id="screen-read" class="screen screen-read" hidden aria-labelledby="read-count">
+      <div class="read-top">
+        <span id="read-count" class="eyebrow read-count">Phrase 1 of 18</span>
+        <div id="read-dots" class="read-dots" aria-hidden="true"></div>
+        <button id="pause-btn" class="text-button">Pause</button>
+      </div>
+
+      <div class="rec-row">
+        <span id="rec-dot" class="rec-dot" aria-hidden="true" hidden></span>
+        <span id="rec-label" class="rec-label" role="status" aria-live="polite"></span>
+        <div class="meter meter-small" role="img" aria-label="Microphone level">
+          <div id="read-meter-fill" class="meter-fill"></div>
+        </div>
+      </div>
+
+      <p id="sentence" class="sentence" tabindex="-1"
+         aria-description="Say this phrase your own way. Nothing here can be wrong."></p>
+
+      <p class="read-hint">
+        Say the whole phrase in your own speech, at your own pace, then press
+        <strong>I’ve said it</strong>. Nothing is following along as you go.
+      </p>
+
+      <div id="paused-panel" class="notice" hidden>
+        <h2>Paused</h2>
+        <p>Nothing is recording. When you’re ready, we’ll take this phrase from the top.</p>
+        <button id="resume-btn" class="btn btn-primary">Resume</button>
+        <a class="text-button" href="/">Stop for now</a>
+      </div>
+
+      <div class="read-actions">
+        <button id="record-btn" class="btn btn-primary">Start recording</button>
+        <button id="done-btn" class="btn btn-primary" hidden>I’ve said it</button>
+        <button id="redo-btn" class="btn btn-ghost" hidden>Start this one over</button>
+        <button id="skip-btn" class="btn btn-ghost">Skip this one</button>
+      </div>
+
+      <p id="live-region" class="visually-hidden" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- 4 · Finish -->
+    <section id="screen-finish" class="screen" hidden aria-labelledby="finish-title">
+      <p class="eyebrow">That’s everything</p>
+      <h1 id="finish-title" class="display">Thank you for<br><em>lending your voice.</em></h1>
+      <p class="lede" id="finish-summary"></p>
+      <p class="lede quiet">
+        Honest note: these recordings stay with Heard on your own machine. Each
+        phrase also becomes one of your Talk phrases, and Heard uses them to
+        learn how you say each sound — that is what the “Learn from my sounds”
+        switch in the app turns on. It is new and not yet measured on many
+        voices, so its guesses are always shown for you to confirm.
+      </p>
+      <ol id="finish-list" class="finish-list"></ol>
+      <div class="actions">
+        <a href="/app" class="btn btn-primary">Open Heard</a>
+        <a href="/" class="text-button">Back to the start</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Heard — built at HackPrinceton 2026.</span>
+    <div class="foot-links">
+      <a href="/how-it-works">How it works</a>
+      <a href="/about">About</a>
+      <a href="/app">The app</a>
+    </div>
+  </footer>
+
+  <script type="module" src="/static/js/calibration/calibrate.js"></script>
+</body>
+</html>
