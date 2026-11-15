@@ -145,3 +145,11 @@ def test_real_transcription(tmp_path):
     assert "water" in t.text.lower()
     assert t.words and t.no_speech_prob < 0.5
     assert t.inference_sec < 5
+
+
+def test_hotwords_hint_is_a_short_deduplicated_word_list():
+    from app.stt import MAX_PROMPT_CHARS, build_prompt
+
+    assert build_prompt(["Satvik", "satvik", " wawa ", ""]) == "Satvik, wawa"
+    assert build_prompt([]) is None
+    assert len(build_prompt([f"word{i}" for i in range(200)])) <= MAX_PROMPT_CHARS

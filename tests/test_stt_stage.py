@@ -87,10 +87,19 @@ def test_threshold_boundary():
     assert at.run(ctx()).candidates[0].type == "phrase"
 
 
-def test_saved_phrases_are_passed_as_a_vocabulary_hint():
+def test_only_unusual_words_from_saved_phrases_are_hinted():
+    common = {"my", "name", "is", "coffee", "please", "i", "want"}
+    s = SpeechToTextStage(FakeBackend("Wawa."), Phrases(("ww", "wawa"), ("c", "Coffee please"),
+                                                        ("n", "My name is Satvik"), ("w", "I want WAWA")),
+                          lexicon_loader=lambda: common)
+    s.run(ctx())
+    assert s.backend.vocabulary == ["wawa", "Satvik"]
+
+
+def test_no_word_list_means_no_hint_rather_than_whole_phrases():
     s = stage("Wawa.", ("ww", "wawa"), ("c", "Coffee please"))
     s.run(ctx())
-    assert s.backend.vocabulary == ["wawa", "Coffee please"]
+    assert s.backend.vocabulary == []
 
 
 def test_personal_word_matches_too():

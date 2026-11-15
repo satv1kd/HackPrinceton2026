@@ -39,7 +39,7 @@ def build_extra_stages(dependencies):
     return [
         PhoneticDecoderStage.from_settings(config, get_phoneme_service(), get_profile_trainer(),
                                            get_lexicon, phrases),
-        SpeechToTextStage.from_settings(config, get_stt_backend(), phrases),
+        SpeechToTextStage.from_settings(config, get_stt_backend(), phrases, get_lexicon),
     ]
 
 

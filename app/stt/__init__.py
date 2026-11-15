@@ -39,9 +39,8 @@ HALLUCINATIONS = frozenset({
     "you", "thank you", "thanks for watching", "thank you for watching",
     "bye", "okay", "so", "uh", "um", "hmm",
 })
-#: ``initial_prompt`` is a vocabulary hint, not a transcript: past a few
-#: hundred characters it starts competing with the audio.
-MAX_PROMPT_CHARS = 400
+#: The hotwords hint is a short list of unusual words, never sentences.
+MAX_PROMPT_CHARS = 200
 #: Mean token log-prob below which the decode is guesswork.
 MIN_AVG_LOGPROB = -1.2
 #: Above this, the segment is more likely silence than speech.
@@ -105,16 +104,19 @@ class SpeechToTextBackend(Protocol):
                    vocabulary: Optional[Iterable[str]] = None) -> Transcript: ...
 
 
-def build_prompt(phrases: Iterable[str]) -> Optional[str]:
-    """Join the user's saved phrase texts into a short vocabulary hint.
+def build_prompt(words: Iterable[str]) -> Optional[str]:
+    """Join unusual words the user says (names, "nebulizer") into a hotwords hint.
 
-    Biases the decoder towards words this user actually says - names, places,
-    "nebulizer" - which is most of the accuracy win on a small model.
+    Only words, never whole saved phrases: given a list of short sentences as
+    its prompt, Whisper carried on the list after the speaker stopped
+    ("Hi, my name is Satvik. Good morning. Good morning.") and took up to
+    10 s doing it. With just the uncommon words it spelled the name right and
+    added nothing, on the same recordings.
     """
     seen: set = set()
     parts: List[str] = []
     length = 0
-    for text in phrases:
+    for text in words:
         text = " ".join(str(text).split())
         key = text.lower()
         if not text or key in seen:
@@ -126,7 +128,7 @@ def build_prompt(phrases: Iterable[str]) -> Optional[str]:
         length += len(text) + 2
     if not parts:
         return None
-    return ". ".join(parts) + "."
+    return ", ".join(parts)
 
 
 def validate_audio(audio: np.ndarray, sr: int) -> np.ndarray:
@@ -225,12 +227,12 @@ class FasterWhisperBackend:
                    vocabulary: Optional[Iterable[str]] = None) -> Transcript:
         audio = validate_audio(audio, sr)
         self.load()
-        prompt = build_prompt(vocabulary) if vocabulary else None
+        hotwords = build_prompt(vocabulary) if vocabulary else None
         started = time.perf_counter()
         with self._run_lock:
             segments, _info = self._model.transcribe(
                 audio, language="en", beam_size=5, word_timestamps=True, vad_filter=True,
-                initial_prompt=prompt)
+                hotwords=hotwords)
             # segments is a lazy generator: decoding happens while iterating.
             transcript = transcript_from_segments(segments)
         transcript.inference_sec = time.perf_counter() - started

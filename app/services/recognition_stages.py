@@ -131,16 +131,37 @@ class SpeechToTextStage:
     may_confirm = False
 
     def __init__(self, backend, phrase_store, enabled: bool = True,
-                 phrase_match_min: float = 85.0, no_speech_max: float = 0.6):
+                 phrase_match_min: float = 85.0, no_speech_max: float = 0.6, lexicon_loader=None):
         self.backend, self.phrase_store = backend, phrase_store
+        #: Common English words (the phonetic engine's word list); anything in
+        #: a saved phrase that is not among them is worth hinting to Whisper.
+        self.lexicon_loader = lexicon_loader
         self._enabled = enabled
         self.phrase_match_min, self.no_speech_max = phrase_match_min, no_speech_max
         self._pool: Optional[ThreadPoolExecutor] = None
 
     @classmethod
-    def from_settings(cls, settings, backend, phrase_store) -> "SpeechToTextStage":
+    def from_settings(cls, settings, backend, phrase_store, lexicon_loader=None) -> "SpeechToTextStage":
         return cls(backend, phrase_store, settings.STT_ENABLED,
-                   settings.STT_PHRASE_MATCH_MIN, settings.STT_NO_SPEECH_MAX)
+                   settings.STT_PHRASE_MATCH_MIN, settings.STT_NO_SPEECH_MAX, lexicon_loader)
+
+    def hint_words(self, phrases) -> List[str]:
+        """Words in the saved phrases that are not common English (names, "wawa").
+
+        Without the word list there is no telling which words are unusual, so
+        no hint at all - hinting whole phrases made Whisper invent text.
+        """
+        import re
+
+        lexicon = self.lexicon_loader() if self.lexicon_loader else None
+        if lexicon is None:
+            return []
+        words = []
+        for phrase in phrases:
+            for word in re.findall(r"[A-Za-z][A-Za-z']*", phrase.text):
+                if word.lower() not in lexicon and word.lower() not in (w.lower() for w in words):
+                    words.append(word)
+        return words
 
     def available(self) -> bool:
         return self._enabled and self.backend.is_available()
@@ -150,9 +171,9 @@ class SpeechToTextStage:
 
     def _transcribe(self, ctx: RecognitionContext):
         phrases = list(self.phrase_store.list_phrases())
-        # The user's own phrases bias the decoder towards the words they say
-        # (names, "nebulizer"), which is most of the accuracy win on base.en.
-        return phrases, self.backend.transcribe(ctx.audio, ctx.sr, vocabulary=[p.text for p in phrases])
+        # Unusual words from the user's phrases (names, "nebulizer") bias the
+        # decoder towards how they are spelled.
+        return phrases, self.backend.transcribe(ctx.audio, ctx.sr, vocabulary=self.hint_words(phrases))
 
     def prefetch(self, ctx: RecognitionContext) -> None:
         if self._pool is None:
