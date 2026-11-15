@@ -29,8 +29,10 @@ CRITICAL = ("ffmpeg", "disk_space")
 
 
 class HealthChecker:
-    def __init__(self, settings, client_factory=None):
+    def __init__(self, settings, client_factory=None, stt_backend=None):
         self.settings = settings
+        #: The app's speech-to-text backend, if one was built (reports "loaded").
+        self.stt_backend = stt_backend
         self._client_factory = client_factory or (
             lambda: httpx.AsyncClient(timeout=PHOTON_TIMEOUT_SEC)
         )
@@ -39,6 +41,7 @@ class HealthChecker:
         checks = {
             "ffmpeg": self.check_ffmpeg(),
             "phoneme_model": self.check_phoneme_model(),
+            "stt": self.check_stt(),
             "elevenlabs": self.check_elevenlabs(),
             "photon_service": await self.check_photon_service(),
             "disk_space": self.check_disk_space(),
@@ -93,6 +96,28 @@ class HealthChecker:
                 "note": f"not installed: {', '.join(missing)} (Phase 4)",
             }
         return {"ok": True, "installed": True, "loaded": False, "note": "Phase 4"}
+
+    def check_stt(self) -> Dict[str, Any]:
+        """Speech-to-text is the fallback when no saved phrase matches.
+
+        Missing it only removes that fallback (saved phrases still work), so
+        it never degrades the overall status. Like the phoneme check, this
+        never imports the heavy package.
+        """
+        enabled = bool(getattr(self.settings, "STT_ENABLED", False))
+        model = getattr(self.settings, "STT_MODEL_SIZE", None)
+        installed = importlib.util.find_spec("faster_whisper") is not None
+        detail: Dict[str, Any] = {"ok": True, "enabled": enabled, "installed": installed, "model": model}
+        if not enabled:
+            detail["note"] = "disabled (STT_ENABLED=false)"
+        elif not installed:
+            detail["note"] = "not installed: make install-stt"
+        else:
+            backend = self.stt_backend
+            detail["loaded"] = bool(getattr(backend, "is_loaded", False))
+            if backend is not None and not backend.is_available():
+                detail["note"] = "model failed to load; see server log"
+        return detail
 
     def check_elevenlabs(self) -> Dict[str, Any]:
         """A missing key is fine: the browser voice takes over."""

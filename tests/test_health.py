@@ -74,7 +74,7 @@ def ffmpeg_present(monkeypatch):
 async def test_reports_every_check():
     result = await build().check_all()
     assert set(result["checks"]) == {
-        "ffmpeg", "phoneme_model", "elevenlabs", "photon_service", "disk_space",
+        "ffmpeg", "phoneme_model", "stt", "elevenlabs", "photon_service", "disk_space",
     }
     assert result["status"] in {"ok", "degraded"}
 

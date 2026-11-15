@@ -1,10 +1,15 @@
 PYTHON ?= python3.13
 
-.PHONY: install dev dev-tunnel dev-all photon test test-client test-all
+.PHONY: install install-stt dev dev-tunnel dev-all photon test test-client test-all
 
 install:
 	$(PYTHON) -m venv .venv
 	.venv/bin/pip install -r requirements-dev.txt
+
+# Optional: local speech-to-text (faster-whisper), the fallback when no saved
+# phrase matches. Then pre-fetch the model: .venv/bin/python scripts/download_models.py --stt
+install-stt:
+	.venv/bin/pip install -r requirements-stt.txt
 
 dev:
 	./run.sh

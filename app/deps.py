@@ -7,6 +7,7 @@ from app.services.audio import AudioPreprocessor
 from app.services.features import FeatureCache, get_extractor
 from app.services.preferences import PhoneticReadiness, Preferences, PreferenceStore
 from app.services.storage import PhraseStore
+from app.stt import FasterWhisperBackend
 
 
 @lru_cache
@@ -36,8 +37,14 @@ def get_phonetic_readiness() -> PhoneticReadiness:
     return PhoneticReadiness()
 
 
+@lru_cache
+def get_stt_backend() -> FasterWhisperBackend:
+    """One speech-to-text backend per process; the model loads on first use."""
+    return FasterWhisperBackend.from_settings(get_settings())
+
+
 def reset_caches() -> None:
     """Forget all singletons (used by tests that change settings)."""
     for fn in (get_settings, get_store, get_preprocessor, get_feature_cache,
-               get_preference_store, get_phonetic_readiness):
+               get_preference_store, get_phonetic_readiness, get_stt_backend):
         fn.cache_clear()
