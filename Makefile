@@ -1,6 +1,6 @@
 PYTHON ?= python3.13
 
-.PHONY: setup install install-stt dev dev-tunnel dev-all photon test test-client test-all
+.PHONY: setup install install-stt install-phonetics dev dev-tunnel dev-all photon test test-client test-all
 
 # System tools (python 3.13, ffmpeg, node, cloudflared). Installs only what is
 # missing and never upgrades, so it is safe to re-run.
@@ -19,6 +19,13 @@ install:
 # phrase matches. Then pre-fetch the model: .venv/bin/python scripts/download_models.py --stt
 install-stt:
 	.venv/bin/pip install -r requirements-stt.txt
+
+# Optional: the phonetic engine ("Learn from my sounds"): torch, transformers,
+# CMUdict, wordfreq; then the word list and the ~1.2 GB phoneme model.
+install-phonetics:
+	.venv/bin/pip install -r requirements-phonetics.txt
+	.venv/bin/python scripts/build_lexicon.py
+	.venv/bin/python scripts/download_models.py --phonemes
 
 dev:
 	./run.sh
