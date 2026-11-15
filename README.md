@@ -90,7 +90,7 @@ Everything has a working default. The settings you're most likely to change:
 | `ELEVENLABS_API_KEY` | Clear spoken output. If empty, the browser's built-in voice is used. |
 | `ELEVENLABS_VOICE_ID` | Which ElevenLabs voice to use. |
 | `MARGIN`, `ABSOLUTE_MAX` | How sure the matcher must be before it auto-accepts a phrase. Tune with `scripts/tune_thresholds.py`. |
-| `PHOTON_API_KEY`, `PHOTON_PROJECT_ID` | Real iMessage sending. If empty, the relay runs in stub mode. |
+| `PHOTON_PROJECT_ID`, `PHOTON_PROJECT_SECRET` | Real iMessage sending. If empty, the relay runs in stub mode. |
 
 ### 3. Start
 
@@ -119,7 +119,7 @@ The relay in `photon-service/` is the only part of the system that talks to Phot
 - **Live mode:**
   ```bash
   cd photon-service && npm install
-  export PHOTON_API_KEY=...  PHOTON_PROJECT_ID=...
+  # put PHOTON_PROJECT_ID and PHOTON_PROJECT_SECRET in .env
   ```
   Then start it with `make photon` or `make dev-all`.
 - **Recipients must message first.** Each recipient has to send `ping` (as an iMessage) to your Photon number once before Heard can text them.

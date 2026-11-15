@@ -3,20 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Relays Heard's confirmed phrases to iMessage through the Photon 2.0 API.",
-  "engines": { "node": ">=22.6" },
+  "description": "Relays Heard's confirmed phrases to iMessage through Photon's Spectrum SDK.",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "start": "node src/index.ts",
     "dev": "node --watch src/index.ts",
     "test": "node --test ../tests/photon-service.test.mjs",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
   "optionalDependencies": {
-    "@photon-ai/api": "*"
+    "spectrum-ts": "^12.16.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }
