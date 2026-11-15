@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
@@ -23,6 +24,7 @@ from app.phonetics.enrollment import enrollment_phrase, load_enrollment_set
 from app.phonetics.inventory import PHONEMES
 from app.phonetics.profile import ProfileStore, SoundProfile
 from app.phonetics.service import take_cache_id
+from app.phonetics.sound_bank import SoundBank
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,33 @@ def take_examples(calibration_store, phoneme_service) -> List[TrainingExample]:
     return examples
 
 
+def build_sound_bank(calibration_store, phoneme_service) -> SoundBank:
+    """Cut every recognized enrollment take into phoneme units (Task 28)."""
+    from app.phonetics.recognizer import read_pcm_wav
+    from app.phonetics.segmenter import force_align
+
+    bank = SoundBank()
+    for record in calibration_store.list_sentences():
+        phrase = enrollment_phrase(record["id"])
+        if phrase is None:
+            continue
+        cache_id = take_cache_id(record["id"], int(record.get("take", 1) or 1))
+        recognition = phoneme_service.cached(cache_id, want_posteriors=True)
+        path = calibration_store.resolve(record.get("audio_path") or "")
+        if (recognition is None or recognition.posteriors is None or not recognition.posterior_labels
+                or not recognition.frame_rate_hz or path is None):
+            continue
+        try:
+            audio, sr = read_pcm_wav(path)
+        except Exception:
+            continue
+        segments = force_align(recognition.posteriors, recognition.posterior_labels, phrase.phonemes,
+                               recognition.frame_rate_hz, duration_sec=len(audio) / sr)
+        bank.add_take(cache_id, audio, sr, segments)
+    bank.finalize()
+    return bank
+
+
 def build_profile(examples: Iterable[TrainingExample], alpha: float) -> SoundProfile:
     examples = list(examples)
     sources = {}
@@ -90,6 +119,8 @@ class ProfileTrainer:
         self.min_occurrences = min_occurrences
         #: Callable returning extra examples from confirmed Talk attempts (Task 31).
         self.feedback_examples = feedback_examples
+        self.bank_dir = Path(data_dir) / "sound_bank"
+        self._bank: Optional[SoundBank] = None
         self._lock = threading.Lock()
 
     @classmethod
@@ -112,8 +143,19 @@ class ProfileTrainer:
                 return None
             profile = build_profile(examples, self.alpha)
             self.store.save(profile)
+            try:
+                bank = build_sound_bank(self.calibration_store, self.phoneme_service)
+                bank.save(self.bank_dir)
+                self._bank = bank
+            except Exception:  # the profile is still useful without the bank
+                log.exception("could not build the sound bank")
             log.info("sound profile v%s built from %s", profile.version, profile.sources)
             return profile
+
+    def sound_bank(self) -> Optional[SoundBank]:
+        if self._bank is None:
+            self._bank = SoundBank.load(self.bank_dir)
+        return self._bank
 
     def current(self) -> Optional[SoundProfile]:
         return self.store.load()
