@@ -89,11 +89,12 @@
         take into one clip per word, using the speech recognizer’s timings.
       </p>
       <p>
-        <strong>Honestly:</strong> today those recordings are stored by Heard
-        on the computer it runs on, as per-word clips, and nothing more. They’re
-        the raw material for the next step —
-        learning how <em>you</em> produce each sound, so Heard can understand
-        words you never recorded. That part is being built; it is not live.
+        <strong>Honestly:</strong> those recordings are stored by Heard on the
+        computer it runs on. Heard uses them to learn how <em>you</em> produce
+        each sound and — when you turn on “Learn from my sounds” — to suggest
+        words you never recorded. It is new and not yet measured on real
+        voices, so every suggestion is shown for you to confirm before it is
+        spoken.
       </p>
 
       <h2>What we don’t do</h2>
@@ -110,7 +111,7 @@
         <li><span>Speaking</span><span>A natural synthesized voice when a key is configured, with the browser’s built-in voice as the fallback.</span></li>
         <li><span>Calibration</span><span>Each sentence is recorded whole, then cut into per-word clips on the server from Whisper’s word timestamps; every clip keeps the word that was asked for alongside what was heard.</span></li>
         <li><span>Storage</span><span>JSON and audio files on disk, on the computer running Heard — for the app and for calibration recordings alike. No cloud storage, no account.</span></li>
-        <li><span>Planned</span><span>A per-person phonetic profile learned from calibration and everyday yes/no taps. In progress, not shipped.</span></li>
+        <li><span>Sound learning</span><span>A per-person phonetic profile (how each of your sounds comes out) learned from calibration and everyday yes/no taps; a phoneme model (wav2vec2) plus a decoder over 5,000 common words. Optional, off by default; it updates itself only when an update helps.</span></li>
       </ul>
 
       <p class="quiet" style="margin-top: 40px;">

@@ -66,7 +66,8 @@ export class CalibrationFlow {
     if (!this.firstShow) {
       const target = id === 'screen-read' ? this.$('sentence') : this.$(id)?.querySelector('h1');
       if (target) {
-        target.setAttribute('tabindex', target.id === 'sentence' ? '0' : '-1');
+        // Focusable for screen readers, but not a Tab stop: nothing to operate.
+        target.setAttribute('tabindex', '-1');
         target.focus?.({ preventScroll: false });
       }
     }

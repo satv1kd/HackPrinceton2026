@@ -125,3 +125,6 @@
 .finish-list .fmeta.recorded { color: var(--sage-400); }
 .finish-list button { white-space: nowrap; }
 .finish-list .btn { min-height: 44px; padding: .45rem 1rem; font-size: .9rem; }
+
+/* Focused only programmatically (for screen readers); not an interactive control. */
+.sentence:focus { outline: none; }
