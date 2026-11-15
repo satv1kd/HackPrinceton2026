@@ -53,6 +53,9 @@ class StageResult:
     #: The best candidate is believable even if not confident (for DTW: within
     #: ABSOLUTE_MAX). Used to order the merged list when nobody is confident.
     plausible: bool = False
+    #: Stop the cascade here without being confident: the answer is good
+    #: enough not to ask later stages, but the user still confirms it.
+    final: bool = False
 
 
 class RecognitionStage(Protocol):
@@ -154,7 +157,8 @@ class SpeechToTextStage:
             candidates.append(MatchCandidate(
                 type="generated", source=self.name, text=transcript.text,
                 score=_logprob_score(transcript.avg_logprob)))
-        return StageResult(self.name, candidates)
+        # Words were heard: believable enough to lead over an unsure decoder.
+        return StageResult(self.name, candidates, plausible=bool(candidates))
 
     def _phrase_matches(self, text: str, ctx: RecognitionContext, phrases):
         from rapidfuzz import fuzz
@@ -196,3 +200,104 @@ def _logprob_score(avg_logprob) -> float:
     if avg_logprob is None or not np.isfinite(avg_logprob):
         return 1.0
     return round(max(0.0, -float(avg_logprob)), 4)
+
+
+class PhoneticDecoderStage:
+    """The user's own sounds (Task 30): phonemes -> profile-weighted decoding.
+
+    Runs only when the "Learn from my sounds" switch is on and the engine is
+    ready (model installed, profile built, word list present). Recognizes the
+    attempt's phonemes, decodes them into the top 3 sentences with the
+    personal sound profile, and:
+
+    * a decoded sentence equal to a saved phrase comes back as that phrase;
+    * when the decoder is sure (margin and cost thresholds), the cascade stops
+      here (``final``) - speech-to-text is skipped - but the answer still
+      needs the user's Yes before it is spoken;
+    * when it is unsure, speech-to-text runs too and both are offered.
+    """
+
+    name = "phonetic"
+    may_confirm = False
+
+    def __init__(self, phoneme_service, trainer, lexicon_loader, phrase_store,
+                 lm_weight: float = 0.3, max_words: int = 6,
+                 margin: float = 0.15, max_cost: float = 3.0):
+        self.phonemes, self.trainer = phoneme_service, trainer
+        self.lexicon_loader, self.phrase_store = lexicon_loader, phrase_store
+        self.lm_weight, self.max_words = lm_weight, max_words
+        self.margin, self.max_cost = margin, max_cost
+        self._decoder = None
+        self._decoder_key = None
+
+    @classmethod
+    def from_settings(cls, settings, phoneme_service, trainer, lexicon_loader, phrase_store):
+        return cls(phoneme_service, trainer, lexicon_loader, phrase_store,
+                   settings.LM_WEIGHT, settings.MAX_DECODE_WORDS,
+                   settings.PHONETIC_MARGIN, settings.PHONETIC_MAX_COST)
+
+    def unavailable_reason(self):
+        return (self.phonemes.unavailable_reason() or self.trainer.readiness()
+                or (None if self.lexicon_loader() is not None
+                    else "The word list isn't built (python scripts/build_lexicon.py)."))
+
+    def available(self) -> bool:
+        return self.unavailable_reason() is None
+
+    def enabled(self, ctx: RecognitionContext) -> bool:
+        return ctx.phonetic_mode
+
+    def _get_decoder(self, phrases):
+        from app.phonetics.decoder import PhoneticDecoder
+
+        profile = self.trainer.current()
+        lexicon = self.lexicon_loader()
+        texts = tuple(sorted(p.text for p in phrases if not p.personal_word))
+        key = (profile.version, id(lexicon), texts)
+        if key != self._decoder_key:
+            self._decoder = PhoneticDecoder(lexicon, profile, self.lm_weight, self.max_words,
+                                            phrase_texts=texts, sound_bank=self.trainer.sound_bank())
+            self._decoder_key = key
+        return self._decoder
+
+    def run(self, ctx: RecognitionContext) -> StageResult:
+        from app.phonetics.decoder import confidence
+        from app.phonetics.service import attempt_cache_id
+        from app.phonetics.sound_bank import fine_features
+        from app.services.recognition import normalize_text
+
+        recognition = self.phonemes.recognize_samples(ctx.audio, ctx.sr,
+                                                      cache_id=attempt_cache_id(ctx.attempt_id))
+        heard = list(recognition.phonemes)
+        ctx.extras["recognized_phonemes"] = heard
+        if not heard:
+            return StageResult(self.name, [])
+        phrases = self.phrase_store.list_phrases()
+        decoder = self._get_decoder(phrases)
+        query = fine_features(ctx.audio, ctx.sr) if decoder.sound_bank is not None else None
+        hyps = decoder.decode(heard, k=3, query_features=query)
+        if not hyps:
+            return StageResult(self.name, [])
+        margin, cost = confidence(hyps, len(heard))
+        sure = margin >= self.margin and cost <= self.max_cost
+        ctx.extras["phonetic"] = {"margin": round(margin, 3) if margin != float("inf") else None,
+                                  "cost": round(cost, 3), "sure": sure}
+        by_text = {normalize_text(p.text): p for p in phrases if not p.personal_word}
+        candidates = []
+        for hyp in hyps:
+            score = round(max(0.0, hyp.cost / len(heard)), 4)
+            phrase = by_text.get(normalize_text(hyp.text))
+            if phrase is not None:
+                candidates.append(MatchCandidate(
+                    type="phrase", source="phonetic", phrase_id=phrase.id, text=phrase.text,
+                    emoji=phrase.emoji, image=f"/api/phrases/{phrase.id}/image" if phrase.image else None,
+                    score=score))
+            else:
+                candidates.append(MatchCandidate(type="generated", source="phonetic",
+                                                 text=_sentence_case(hyp.text), score=score))
+        return StageResult(self.name, candidates, confident=False, plausible=sure, final=sure)
+
+
+def _sentence_case(text: str) -> str:
+    text = " ".join("I" if w == "i" else ("I" + w[1:] if w.startswith("i'") else w) for w in text.split())
+    return text[:1].upper() + text[1:]

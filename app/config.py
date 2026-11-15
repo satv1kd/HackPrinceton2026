@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     MAX_DECODE_WORDS: int = 6
     PROFILE_SMOOTHING_ALPHA: float = 1.0
     LM_WEIGHT: float = 0.3
+    # The phonetic decoder answers on its own (skipping speech-to-text) only
+    # when its best guess beats the runner-up by PHONETIC_MARGIN per heard
+    # phoneme and costs at most PHONETIC_MAX_COST per heard phoneme. Starting
+    # values from a simulated enrollment; task 34 tunes them on real voices.
+    PHONETIC_MARGIN: float = 0.15
+    PHONETIC_MAX_COST: float = 3.0
     RETRAIN_MIN_NEW_EXAMPLES: int = 10
     HOLDOUT_FRACTION: float = 0.2
     # Initial value of the user-facing "phonetic mode" switch; the live value
