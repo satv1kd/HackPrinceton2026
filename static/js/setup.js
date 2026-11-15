@@ -437,6 +437,7 @@ export class SampleRecorderFlow {
     try {
       const recording = await this.recorder.start(() => this.update('Listening…'));
       this.busy = false;
+      this.releasePlayback(); // a new take replaces the old clip
       if (!recording) {
         this.update('That was too short. Try once more.');
         return;
@@ -456,14 +457,44 @@ export class SampleRecorderFlow {
     }
   }
 
+  /**
+   * One object URL and one <audio> per recording, reused across taps.
+   *
+   * This used to revoke the previous URL and create a new Audio on every tap.
+   * Tapping Play twice quickly revoked the URL the first player was still
+   * loading, and Chrome rejected it with "NotSupportedError: no supported
+   * source" — reported as "Could not play that back" although the clip was fine.
+   */
   play() {
     if (!this.pending) return;
-    this.playbackUrl && URL.revokeObjectURL(this.playbackUrl);
-    this.playbackUrl = URL.createObjectURL(this.pending.blob);
-    new Audio(this.playbackUrl).play().catch(() => this.update('Could not play that back.', 'error'));
+    if (!this.player) {
+      this.playbackUrl = URL.createObjectURL(this.pending.blob);
+      this.player = new Audio(this.playbackUrl);
+    } else {
+      this.player.pause();
+      this.player.currentTime = 0;
+    }
+    const { blob, mimeType } = this.pending;
+    this.player.play().catch(error => {
+      // AbortError just means a newer tap interrupted this one.
+      if (error.name === 'AbortError') return;
+      console.error('Sample playback failed', { error, mimeType, size: blob.size });
+      this.update(`Could not play that back (${error.name}: ${error.message}).`, 'error');
+    });
+  }
+
+  /** Stop playback and free the clip's URL; called whenever the recording is discarded. */
+  releasePlayback() {
+    this.player?.pause();
+    this.player = null;
+    if (this.playbackUrl) {
+      URL.revokeObjectURL(this.playbackUrl);
+      this.playbackUrl = null;
+    }
   }
 
   reset() {
+    this.releasePlayback();
     this.pending = null;
     this.controls.hidden = true;
     this.update('Tap to record again.');
@@ -480,6 +511,7 @@ export class SampleRecorderFlow {
       body.append('audio', this.pending.blob, `sample.${extension}`);
       await requestJSON(`/api/phrases/${this.phrase.id}/samples`, { method: 'POST', body });
       this.recorded += 1;
+      this.releasePlayback();
       this.pending = null;
       this.controls.hidden = true;
       if (this.recorded >= this.target) {
@@ -502,10 +534,7 @@ export class SampleRecorderFlow {
 
   close() {
     this.recorder.cancel();
-    if (this.playbackUrl) {
-      URL.revokeObjectURL(this.playbackUrl);
-      this.playbackUrl = null;
-    }
+    this.releasePlayback();
     this.overlay?.remove();
     this.overlay = null;
   }
