@@ -139,3 +139,10 @@ h1 { font-size: clamp(1.7rem, 5vw, 2.5rem); font-weight: 550; letter-spacing: -.
   border: 1px dashed var(--muted); border-radius: .4rem; font-size: .8rem; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* Task 20: say a confirmed result again. Large and tappable like the other result controls. */
+.replay-btn { display: block; width: 100%; min-height: 56px; margin: 0 0 16px; padding: 12px 16px;
+  font: inherit; font-size: 1.15rem; font-weight: 600; border-radius: 14px; cursor: pointer;
+  background: var(--paper); color: var(--ink); border: 2px solid var(--ink); }
+.replay-btn:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.result-text .generated-badge { font-size: .8rem; vertical-align: middle; }
